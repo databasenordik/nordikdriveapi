@@ -19,7 +19,7 @@ type GetConfigResult struct {
 
 // GetByFileNameIfModified:
 // - Finds active config by file_name (case-insensitive), latest updated_at.
-// - If clientLastModified is present and config not newer => NotModified=true.
+// - Always loads the current content; cache validation is content based.
 func (s *DataConfigService) GetByFileNameIfModified(fileName string, clientLastModified *time.Time) (*GetConfigResult, error) {
 	name := strings.TrimSpace(fileName)
 	if name == "" {
@@ -41,16 +41,9 @@ func (s *DataConfigService) GetByFileNameIfModified(fileName string, clientLastM
 		return nil, err
 	}
 
-	// Keep exact comparison. Frontend is sending RFC3339Nano already.
-	if clientLastModified != nil {
-		dbTime := cfg.UpdatedAt.UTC()
-		clientTime := clientLastModified.UTC()
-
-		// not modified when DB updated_at <= client timestamp
-		if !dbTime.After(clientTime) {
-			return &GetConfigResult{NotModified: true, Config: &cfg}, nil
-		}
-	}
+	// Direct JSON edits may leave updated_at unchanged. A timestamp alone cannot
+	// establish that the client has the current configuration. The controller
+	// compares a checksum computed from the returned content instead.
 
 	return &GetConfigResult{NotModified: false, Config: &cfg}, nil
 }

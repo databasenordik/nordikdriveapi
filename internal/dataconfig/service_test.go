@@ -183,7 +183,7 @@ func TestDataConfigService_GetByFileNameIfModified_LatestActiveCaseInsensitive(t
 	}
 }
 
-func TestDataConfigService_GetByFileNameIfModified_NotModified(t *testing.T) {
+func TestDataConfigService_GetByFileNameIfModified_TimestampDoesNotSuppressContent(t *testing.T) {
 	db := newTestDB(t)
 	svc := &DataConfigService{DB: db}
 
@@ -206,8 +206,8 @@ func TestDataConfigService_GetByFileNameIfModified_NotModified(t *testing.T) {
 	if got == nil || got.Config == nil {
 		t.Fatal("expected result, got nil")
 	}
-	if !got.NotModified {
-		t.Fatal("expected NotModified=true")
+	if got.NotModified {
+		t.Fatal("timestamp alone must not suppress current configuration")
 	}
 	if got.Config.FileID != cfg.FileID {
 		t.Fatalf("file_id = %d want %d", got.Config.FileID, cfg.FileID)

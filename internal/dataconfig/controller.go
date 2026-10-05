@@ -1,6 +1,8 @@
 package dataconfig
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -44,19 +46,20 @@ func (cc *DataConfigController) GetConfig(c *gin.Context) {
 	}
 
 	cfg := res.Config
+	// Compute from JSON rather than trusting a stored checksum or timestamp.
+	checksum := fmt.Sprintf("%x", sha256.Sum256(cfg.Config))
+	c.Header("Cache-Control", "private, no-cache")
 
 	c.Header("Last-Modified", cfg.UpdatedAt.UTC().Format(time.RFC3339Nano))
-	if cfg.Checksum != "" {
-		c.Header("ETag", cfg.Checksum)
-	}
+	c.Header("ETag", `"`+checksum+`"`)
 
-	if res.NotModified {
+	if c.Query("checksum") == checksum {
 		c.JSON(http.StatusOK, gin.H{
 			"not_modified": true,
 			"file_id":      cfg.FileID,
 			"file_name":    cfg.FileName,
 			"version":      cfg.Version,
-			"checksum":     cfg.Checksum,
+			"checksum":     checksum,
 			"updated_at":   cfg.UpdatedAt,
 		})
 		return
@@ -67,7 +70,7 @@ func (cc *DataConfigController) GetConfig(c *gin.Context) {
 		"file_id":      cfg.FileID,
 		"file_name":    cfg.FileName,
 		"version":      cfg.Version,
-		"checksum":     cfg.Checksum,
+		"checksum":     checksum,
 		"updated_at":   cfg.UpdatedAt,
 		"config":       configForResponse(cfg.Config),
 	})

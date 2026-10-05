@@ -1,8 +1,10 @@
 package dataconfig
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -170,8 +172,8 @@ func TestDataConfigController_GetConfig_Modified(t *testing.T) {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 	}
 
-	if got := w.Header().Get("ETag"); got != "abc123" {
-		t.Fatalf("etag = %q, want %q", got, "abc123")
+	if got := w.Header().Get("ETag"); got != fmt.Sprintf(`"%x"`, sha256.Sum256(cfg.Config)) {
+		t.Fatalf("etag = %q, want content checksum", got)
 	}
 	if got := w.Header().Get("Last-Modified"); got != updatedAt.UTC().Format(time.RFC3339Nano) {
 		t.Fatalf("last-modified = %q", got)
@@ -295,7 +297,7 @@ func TestDataConfigController_GetConfig_NotModified(t *testing.T) {
 		},
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/config?file_name=cache.json", nil)
+	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/config?file_name=cache.json&checksum=%x", sha256.Sum256(cfg.Config)), nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -313,6 +315,34 @@ func TestDataConfigController_GetConfig_NotModified(t *testing.T) {
 	}
 	if _, exists := body["config"]; exists {
 		t.Fatalf("config should not exist, got %#v", body["config"])
+	}
+}
+
+func TestDataConfigController_ContentEditInvalidatesCacheWithoutTimestampChange(t *testing.T) {
+	updatedAt := time.Date(2026, 2, 25, 12, 0, 0, 0, time.UTC)
+	oldContent := datatypes.JSON([]byte(`{"enabled":true}`))
+	cfg := &DataConfig{FileName: "cache.json", Config: oldContent, Checksum: "unchanged-stored-checksum", UpdatedAt: updatedAt}
+	r := setupControllerRouter(&mockDataConfigService{
+		getByFileNameIfModifiedFn: func(string, *time.Time) (*GetConfigResult, error) {
+			return &GetConfigResult{Config: cfg}, nil
+		},
+	})
+	cfg.Config = datatypes.JSON([]byte(`{"enabled":false}`))
+	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/config?file_name=cache.json&checksum=%x&last_modified=%s", sha256.Sum256(oldContent), updatedAt.Format(time.RFC3339Nano)), nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d", w.Code)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["not_modified"] != false {
+		t.Fatalf("content change was suppressed: %s", w.Body.String())
+	}
+	if body["config"].(map[string]any)["enabled"] != false {
+		t.Fatalf("stale config: %s", w.Body.String())
 	}
 }
 

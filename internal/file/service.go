@@ -554,6 +554,24 @@ func (fs *FileService) GetFileData(filename string, version int) ([]FileData, er
 			}
 		}
 
+		// Column order controls presentation, not which stored fields are returned.
+		// Preserve fields added after the saved schema so configuration-driven
+		// views and edit forms can still access their values.
+		orderedColumns := make(map[string]struct{}, len(columnsOrder))
+		for _, col := range columnsOrder {
+			orderedColumns[col] = struct{}{}
+		}
+		extraColumns := make([]string, 0)
+		for col := range rowMap {
+			if _, exists := orderedColumns[col]; !exists {
+				extraColumns = append(extraColumns, col)
+			}
+		}
+		sort.Strings(extraColumns)
+		for _, col := range extraColumns {
+			orderedRow.Set(col, rowMap[col])
+		}
+
 		// Marshal back to JSON
 		jsonBytes, err := orderedRow.MarshalJSON()
 		if err != nil {

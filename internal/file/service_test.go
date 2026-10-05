@@ -1018,10 +1018,10 @@ func TestFileService_GetFileData_AllBranches(t *testing.T) {
 		Version:      5,
 		ColumnsOrder: cols,
 	}).Error
-	// row has keys out-of-order + missing "c"
+	// Row has keys out of order, missing "c", and fields absent from saved column order.
 	_ = db.Create(&FileData{
 		FileID:  f3.ID,
-		RowData: datatypes.JSON([]byte(`{"a":"1","b":"2"}`)),
+		RowData: datatypes.JSON([]byte(`{"a":"1","b":"2","Name Comments":"Stored annotation","New Field":"Preserved"}`)),
 		Version: 5,
 	}).Error
 
@@ -1033,7 +1033,7 @@ func TestFileService_GetFileData_AllBranches(t *testing.T) {
 	if err := json.Compact(&compact, rows[0].RowData); err != nil {
 		t.Fatalf("compact ordered row: %v", err)
 	}
-	if compact.String() != `{"b":"2","a":"1","c":""}` {
+	if compact.String() != `{"b":"2","a":"1","c":"","Name Comments":"Stored annotation","New Field":"Preserved"}` {
 		t.Fatalf("unexpected ordered row: %s", compact.String())
 	}
 

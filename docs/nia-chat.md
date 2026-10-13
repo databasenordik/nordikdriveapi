@@ -25,8 +25,9 @@ errors. It does not switch back to Go automatically on failure. Audio questions
 are transcribed through the existing Gemini client before forwarding the text.
 
 NIA must be deployed with `NIA_TRANSPORT=grpc`, a configured
-`NIA_GRPC_PRINCIPAL_ID`, intended `NIA_GRPC_ALLOWED_FILE_IDS`, its database and
-reasoning settings, and migration `069_grpc_scoped_retrieval.sql`. Enable HTTP/2
+`NIA_GRPC_PRINCIPAL_ID`, its database and reasoning settings, and migration
+`069_grpc_scoped_retrieval.sql`. Each request is scoped to the file selected by Go;
+there is no fixed `NIA_GRPC_ALLOWED_FILE_IDS` setting. Enable HTTP/2
 and a TCP startup probe on that Cloud Run service. This initial gRPC endpoint
 does not require authentication; all calls use the configured NIA data scope.
 The NIA repository's `docs/GRPC_INTEGRATION.md` contains the full setup.

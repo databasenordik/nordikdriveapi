@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"errors"
 	"net/http"
 	"nordik-drive-api/internal/util"
 	"strconv"
@@ -11,10 +12,15 @@ import (
 
 type ChatController struct {
 	ChatService *ChatService
+	Backend     ChatBackend
 }
 
-func NewChatController(cs *ChatService) *ChatController {
-	return &ChatController{ChatService: cs}
+func NewChatController(cs *ChatService, backends ...ChatBackend) *ChatController {
+	var backend ChatBackend = legacyChatBackend{service: cs}
+	if len(backends) > 0 && backends[0] != nil {
+		backend = backends[0]
+	}
+	return &ChatController{ChatService: cs, Backend: backend}
 }
 
 func (cc *ChatController) Chat(c *gin.Context) {
@@ -31,13 +37,21 @@ func (cc *ChatController) Chat(c *gin.Context) {
 		return
 	}
 
-	result, err := cc.ChatService.Chat(question, audioFile, filename, communities)
+	result, err := cc.Backend.Chat(c.Request.Context(), question, audioFile, filename, communities, c.PostForm("conversation_id"))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		statusCode := http.StatusInternalServerError
+		var upstream *ChatHTTPError
+		if errors.As(err, &upstream) {
+			statusCode = upstream.Status
+		}
+		c.JSON(statusCode, gin.H{"error": err.Error()})
 		return
 	}
 
 	response := gin.H{"answer": result.Answer}
+	if result.ConversationID != "" {
+		response["conversation_id"] = result.ConversationID
+	}
 	if result.MatchedRowID != nil {
 		response["matched_row_id"] = *result.MatchedRowID
 	}

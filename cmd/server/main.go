@@ -135,7 +135,12 @@ func main() {
 	})
 
 	chatService := &chat.ChatService{DB: db, Client: client}
-	chat.RegisterRoutes(r, chatService)
+	chatBackend, closeChatBackend, err := chat.NewConfiguredChatBackend(chatService)
+	if err != nil {
+		log.Fatalf("invalid chat backend configuration: %v", err)
+	}
+	defer closeChatBackend()
+	chat.RegisterRoutes(r, chatService, chatBackend)
 
 	honourService := honour.NewService(db, chatService)
 	appLocation := loadAppLocation(cfg.AppTimeZone)

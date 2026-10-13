@@ -6,8 +6,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func RegisterRoutes(r *gin.Engine, chatService *ChatService) {
-	chatController := &ChatController{ChatService: chatService}
+func RegisterRoutes(r *gin.Engine, chatService *ChatService, backends ...ChatBackend) {
+	chatController := NewChatController(chatService, backends...)
 
 	userGroup := r.Group("/api/chat")
 	userGroup.Use(middlewares.AuthMiddleware())

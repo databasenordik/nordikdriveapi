@@ -22,6 +22,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Temporary OIDC diagnosis: these are public GitHub Actions context values,
+      # not credentials. They must match the provider's attribute condition.
+      - name: Show GitHub OIDC identity
+        run: |
+          echo "repository=$GITHUB_REPOSITORY"
+          echo "ref=$GITHUB_REF"
+
       # OIDC → short-lived creds (no keys)
       - id: auth
         uses: google-github-actions/auth@v3

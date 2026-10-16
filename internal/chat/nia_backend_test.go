@@ -61,6 +61,7 @@ func setupNIAController(t *testing.T, target string) (*gin.Engine, sqlmock.Sqlmo
 	t.Cleanup(closeBackend)
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
+	router.Use(func(c *gin.Context) { c.Set("userID", float64(7)) })
 	router.POST("/api/chat", NewChatController(&ChatService{DB: db}, backend).Chat)
 	return router, mock
 }
@@ -79,14 +80,14 @@ func requestChat(router http.Handler, communities string) *httptest.ResponseReco
 
 func TestNIAChatController_TranslatesFormAndPreservesAnswer(t *testing.T) {
 	target := startTestNIA(t, func(ctx context.Context, req *niapb.QueryRequest) (*niapb.QueryResponse, error) {
-		if req.SelectedFileId != 49 || req.Question == "" || len(req.Communities) != 2 {
+		if req.UserId != 7 || req.SelectedFileId != 49 || req.Question == "" || len(req.Communities) != 2 {
 			t.Errorf("unexpected query: %v", req)
 		}
 		md, _ := metadata.FromIncomingContext(ctx)
 		if len(md.Get("authorization")) != 0 {
 			t.Error("unexpected service authentication")
 		}
-		return &niapb.QueryResponse{Status: "answered", Answer: "NIA answer", ConversationId: "conversation-1"}, nil
+		return &niapb.QueryResponse{Status: "answered", Answer: "NIA answer", ConversationId: "conversation-1", ExchangeId: "exchange-1"}, nil
 	})
 	router, mock := setupNIAController(t, target)
 	response := requestChat(router, "Garden River, Batchewana")
@@ -97,7 +98,7 @@ func TestNIAChatController_TranslatesFormAndPreservesAnswer(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if body["answer"] != "NIA answer" || body["conversation_id"] != "conversation-1" {
+	if body["answer"] != "NIA answer" || body["conversation_id"] != "conversation-1" || body["exchange_id"] != "exchange-1" {
 		t.Fatalf("response: %v", body)
 	}
 	if _, exists := body["matched_row_id"]; exists {
@@ -195,7 +196,7 @@ func TestNIABackend_TranscribesAudioBeforeQuery(t *testing.T) {
 		return rawAnswer(transcript), nil
 	}
 	audio := makeAudioFileHeader(t, "audio/webm", []byte("spoken question"))
-	reply, err := backend.Chat(context.Background(), "", audio, "sheet.xlsx", nil, "")
+	reply, err := backend.Chat(context.WithValue(context.Background(), chatUserContextKey{}, int64(7)), "", audio, "sheet.xlsx", nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,3 +250,67 @@ func TestNIAChatController_PythonIntegration(t *testing.T) {
 }
 
 func fmtString(value any) string { text, _ := value.(string); return text }
+
+func TestNIAUserFileHistory_PythonIntegration(t *testing.T) {
+	target := os.Getenv("NIA_TEST_TARGET")
+	if target == "" {
+		t.Skip("set NIA_TEST_TARGET to a fixture-backed Python gRPC server")
+	}
+	conn, err := grpc.NewClient(target, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { conn.Close() })
+	client := niapb.NewAssistantClient(conn)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	exchangeIDs := []string{}
+	ask := func(user, file int64) string {
+		reply, err := client.Query(ctx, &niapb.QueryRequest{UserId: user, SelectedFileId: file, Question: "How many records are in this list?"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if reply.ConversationId == "" {
+			t.Fatal("missing conversation ID")
+		}
+		if reply.ExchangeId == "" {
+			t.Fatal("missing exchange ID")
+		}
+		exchangeIDs = append(exchangeIDs, reply.ExchangeId)
+		return reply.ConversationId
+	}
+	first := ask(101, 49)
+	if ask(101, 49) != first {
+		t.Fatal("same user/file did not resume")
+	}
+	if exchangeIDs[0] == exchangeIDs[1] {
+		t.Fatal("different questions reused an exchange ID")
+	}
+	if ask(102, 49) == first || ask(101, 91) == first {
+		t.Fatal("user/file isolation failed")
+	}
+	history, err := client.History(ctx, &niapb.HistoryRequest{UserId: 101, SelectedFileId: 49, Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		ID      string `json:"conversation_id"`
+		Entries []struct {
+			ExchangeID string `json:"exchange_id"`
+		} `json:"entries"`
+		HasMore bool `json:"has_more"`
+	}
+	if err := json.Unmarshal(history.ResultJson, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.ID != first || len(body.Entries) != 1 || !body.HasMore {
+		t.Fatalf("incorrect history: %s", history.ResultJson)
+	}
+	if body.Entries[0].ExchangeID != exchangeIDs[1] {
+		t.Fatal("history did not return the latest Q/A pair")
+	}
+	_, err = client.History(ctx, &niapb.HistoryRequest{UserId: 102, SelectedFileId: 49, ConversationId: first})
+	if status.Code(err) != codes.NotFound {
+		t.Fatalf("foreign history: %v", err)
+	}
+}

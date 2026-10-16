@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"nordik-drive-api/internal/util"
@@ -37,7 +38,16 @@ func (cc *ChatController) Chat(c *gin.Context) {
 		return
 	}
 
-	result, err := cc.Backend.Chat(c.Request.Context(), question, audioFile, filename, communities, c.PostForm("conversation_id"))
+	conversationID := strings.TrimSpace(c.PostForm("conversation_id"))
+	ctx := c.Request.Context()
+	if _, usesNIA := cc.Backend.(historyBackend); usesNIA {
+		userID, ok := chatUserID(c)
+		if !ok {
+			return
+		}
+		ctx = context.WithValue(ctx, chatUserContextKey{}, userID)
+	}
+	result, err := cc.Backend.Chat(ctx, question, audioFile, filename, communities, conversationID)
 	if err != nil {
 		statusCode := http.StatusInternalServerError
 		var upstream *ChatHTTPError
@@ -51,6 +61,9 @@ func (cc *ChatController) Chat(c *gin.Context) {
 	response := gin.H{"answer": result.Answer}
 	if result.ConversationID != "" {
 		response["conversation_id"] = result.ConversationID
+	}
+	if result.ExchangeID != "" {
+		response["exchange_id"] = result.ExchangeID
 	}
 	if result.MatchedRowID != nil {
 		response["matched_row_id"] = *result.MatchedRowID

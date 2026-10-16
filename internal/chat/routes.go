@@ -13,6 +13,7 @@ func RegisterRoutes(r *gin.Engine, chatService *ChatService, backends ...ChatBac
 	userGroup.Use(middlewares.AuthMiddleware())
 	{
 		userGroup.POST("", chatController.Chat)
+		userGroup.GET("/history", chatController.History)
 		userGroup.POST("/tts", chatController.TTS)
 		userGroup.GET("/describe/:id", chatController.Describe)
 	}

@@ -19,8 +19,9 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Assistant_Query_FullMethodName  = "/nordik.nia.v1.Assistant/Query"
-	Assistant_Health_FullMethodName = "/nordik.nia.v1.Assistant/Health"
+	Assistant_Query_FullMethodName   = "/nordik.nia.v1.Assistant/Query"
+	Assistant_Health_FullMethodName  = "/nordik.nia.v1.Assistant/Health"
+	Assistant_History_FullMethodName = "/nordik.nia.v1.Assistant/History"
 )
 
 // AssistantClient is the client API for Assistant service.
@@ -29,6 +30,7 @@ const (
 type AssistantClient interface {
 	Query(ctx context.Context, in *QueryRequest, opts ...grpc.CallOption) (*QueryResponse, error)
 	Health(ctx context.Context, in *HealthRequest, opts ...grpc.CallOption) (*HealthResponse, error)
+	History(ctx context.Context, in *HistoryRequest, opts ...grpc.CallOption) (*HistoryResponse, error)
 }
 
 type assistantClient struct {
@@ -59,12 +61,23 @@ func (c *assistantClient) Health(ctx context.Context, in *HealthRequest, opts ..
 	return out, nil
 }
 
+func (c *assistantClient) History(ctx context.Context, in *HistoryRequest, opts ...grpc.CallOption) (*HistoryResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(HistoryResponse)
+	err := c.cc.Invoke(ctx, Assistant_History_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AssistantServer is the server API for Assistant service.
 // All implementations must embed UnimplementedAssistantServer
 // for forward compatibility.
 type AssistantServer interface {
 	Query(context.Context, *QueryRequest) (*QueryResponse, error)
 	Health(context.Context, *HealthRequest) (*HealthResponse, error)
+	History(context.Context, *HistoryRequest) (*HistoryResponse, error)
 	mustEmbedUnimplementedAssistantServer()
 }
 
@@ -80,6 +93,9 @@ func (UnimplementedAssistantServer) Query(context.Context, *QueryRequest) (*Quer
 }
 func (UnimplementedAssistantServer) Health(context.Context, *HealthRequest) (*HealthResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Health not implemented")
+}
+func (UnimplementedAssistantServer) History(context.Context, *HistoryRequest) (*HistoryResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method History not implemented")
 }
 func (UnimplementedAssistantServer) mustEmbedUnimplementedAssistantServer() {}
 func (UnimplementedAssistantServer) testEmbeddedByValue()                   {}
@@ -138,6 +154,24 @@ func _Assistant_Health_Handler(srv interface{}, ctx context.Context, dec func(in
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Assistant_History_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(HistoryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AssistantServer).History(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Assistant_History_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AssistantServer).History(ctx, req.(*HistoryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Assistant_ServiceDesc is the grpc.ServiceDesc for Assistant service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -152,6 +186,10 @@ var Assistant_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Health",
 			Handler:    _Assistant_Health_Handler,
+		},
+		{
+			MethodName: "History",
+			Handler:    _Assistant_History_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

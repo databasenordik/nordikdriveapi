@@ -1,7 +1,9 @@
 package chat
 
 type ChatResult struct {
+	Question       string            `json:"-"`
 	ConversationID string            `json:"conversation_id,omitempty"`
+	ExchangeID     string            `json:"exchange_id,omitempty"`
 	Answer         string            `json:"answer"`
 	MatchedRowID   *int              `json:"matched_row_id,omitempty"`
 	Debug          *ChatDebugMetrics `json:"debug,omitempty"`

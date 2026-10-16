@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -71,6 +72,10 @@ func envBool(name string, fallback bool) (bool, error) {
 }
 
 func (b *niaChatBackend) Chat(ctx context.Context, question string, audio *multipart.FileHeader, filename string, communities []string, conversationID string) (*ChatResult, error) {
+	userID, _ := ctx.Value(chatUserContextKey{}).(int64)
+	if userID <= 0 {
+		return nil, &ChatHTTPError{Status: http.StatusUnauthorized, Message: "user identity is required"}
+	}
 	ctx, cancel := context.WithTimeout(ctx, b.timeout)
 	defer cancel()
 	file, err := b.service.lookupChatFile(filename)
@@ -100,7 +105,7 @@ func (b *niaChatBackend) Chat(ctx context.Context, question string, audio *multi
 		return nil, &ChatHTTPError{Status: http.StatusBadRequest, Message: "question or audio is required"}
 	}
 	reply, err := b.client.Query(ctx, &niapb.QueryRequest{
-		Question: question, SelectedFileId: int64(file.ID), Communities: communities, ConversationId: conversationID,
+		Question: question, SelectedFileId: int64(file.ID), Communities: communities, ConversationId: conversationID, UserId: userID,
 	})
 	if err != nil {
 		return nil, mapNIAError(err)
@@ -118,11 +123,30 @@ func (b *niaChatBackend) Chat(ctx context.Context, question string, audio *multi
 	if reply.GetStatus() == "" || strings.TrimSpace(reply.GetAnswer()) == "" {
 		return nil, &ChatHTTPError{Status: http.StatusBadGateway, Message: "NIA returned an empty answer"}
 	}
-	return &ChatResult{Answer: reply.GetAnswer(), ConversationID: reply.GetConversationId()}, nil
+	return &ChatResult{Question: question, Answer: reply.GetAnswer(), ConversationID: reply.GetConversationId(), ExchangeID: reply.GetExchangeId()}, nil
+}
+
+func (b *niaChatBackend) History(ctx context.Context, userID int64, fileID uint, conversationID string, limit int) (json.RawMessage, error) {
+	ctx, cancel := context.WithTimeout(ctx, b.timeout)
+	defer cancel()
+	reply, err := b.client.History(ctx, &niapb.HistoryRequest{
+		UserId: userID, SelectedFileId: int64(fileID), ConversationId: conversationID, Limit: int32(limit),
+	})
+	if err != nil {
+		return nil, mapNIAError(err)
+	}
+	if !json.Valid(reply.ResultJson) {
+		return nil, &ChatHTTPError{Status: http.StatusBadGateway, Message: "NIA returned invalid history"}
+	}
+	return json.RawMessage(reply.ResultJson), nil
 }
 
 func mapNIAError(err error) error {
 	switch status.Code(err) {
+	case codes.NotFound:
+		return &ChatHTTPError{Status: http.StatusNotFound, Message: "conversation not found"}
+	case codes.PermissionDenied:
+		return &ChatHTTPError{Status: http.StatusForbidden, Message: "conversation access denied"}
 	case codes.InvalidArgument:
 		return &ChatHTTPError{Status: http.StatusBadRequest, Message: status.Convert(err).Message()}
 	case codes.DeadlineExceeded:

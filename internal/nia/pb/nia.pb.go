@@ -28,6 +28,7 @@ type QueryRequest struct {
 	ConversationId string                 `protobuf:"bytes,3,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
 	Model          string                 `protobuf:"bytes,4,opt,name=model,proto3" json:"model,omitempty"`
 	Communities    []string               `protobuf:"bytes,5,rep,name=communities,proto3" json:"communities,omitempty"`
+	UserId         int64                  `protobuf:"varint,6,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -97,6 +98,13 @@ func (x *QueryRequest) GetCommunities() []string {
 	return nil
 }
 
+func (x *QueryRequest) GetUserId() int64 {
+	if x != nil {
+		return x.UserId
+	}
+	return 0
+}
+
 type QueryResponse struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	Status         string                 `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
@@ -106,6 +114,7 @@ type QueryResponse struct {
 	ErrorCode      string                 `protobuf:"bytes,5,opt,name=error_code,json=errorCode,proto3" json:"error_code,omitempty"`
 	Detail         string                 `protobuf:"bytes,6,opt,name=detail,proto3" json:"detail,omitempty"`
 	ResultJson     []byte                 `protobuf:"bytes,7,opt,name=result_json,json=resultJson,proto3" json:"result_json,omitempty"`
+	ExchangeId     string                 `protobuf:"bytes,8,opt,name=exchange_id,json=exchangeId,proto3" json:"exchange_id,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -189,6 +198,13 @@ func (x *QueryResponse) GetResultJson() []byte {
 	return nil
 }
 
+func (x *QueryResponse) GetExchangeId() string {
+	if x != nil {
+		return x.ExchangeId
+	}
+	return ""
+}
+
 type HealthRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -269,17 +285,130 @@ func (x *HealthResponse) GetStatus() string {
 	return ""
 }
 
+type HistoryRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	UserId         int64                  `protobuf:"varint,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	SelectedFileId int64                  `protobuf:"varint,2,opt,name=selected_file_id,json=selectedFileId,proto3" json:"selected_file_id,omitempty"`
+	ConversationId string                 `protobuf:"bytes,3,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
+	Limit          int32                  `protobuf:"varint,4,opt,name=limit,proto3" json:"limit,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *HistoryRequest) Reset() {
+	*x = HistoryRequest{}
+	mi := &file_nia_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HistoryRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HistoryRequest) ProtoMessage() {}
+
+func (x *HistoryRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_nia_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HistoryRequest.ProtoReflect.Descriptor instead.
+func (*HistoryRequest) Descriptor() ([]byte, []int) {
+	return file_nia_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *HistoryRequest) GetUserId() int64 {
+	if x != nil {
+		return x.UserId
+	}
+	return 0
+}
+
+func (x *HistoryRequest) GetSelectedFileId() int64 {
+	if x != nil {
+		return x.SelectedFileId
+	}
+	return 0
+}
+
+func (x *HistoryRequest) GetConversationId() string {
+	if x != nil {
+		return x.ConversationId
+	}
+	return ""
+}
+
+func (x *HistoryRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+type HistoryResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ResultJson    []byte                 `protobuf:"bytes,1,opt,name=result_json,json=resultJson,proto3" json:"result_json,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HistoryResponse) Reset() {
+	*x = HistoryResponse{}
+	mi := &file_nia_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HistoryResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HistoryResponse) ProtoMessage() {}
+
+func (x *HistoryResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_nia_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HistoryResponse.ProtoReflect.Descriptor instead.
+func (*HistoryResponse) Descriptor() ([]byte, []int) {
+	return file_nia_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *HistoryResponse) GetResultJson() []byte {
+	if x != nil {
+		return x.ResultJson
+	}
+	return nil
+}
+
 var File_nia_proto protoreflect.FileDescriptor
 
 const file_nia_proto_rawDesc = "" +
 	"\n" +
-	"\tnia.proto\x12\rnordik.nia.v1\"\xb5\x01\n" +
+	"\tnia.proto\x12\rnordik.nia.v1\"\xce\x01\n" +
 	"\fQueryRequest\x12\x1a\n" +
 	"\bquestion\x18\x01 \x01(\tR\bquestion\x12(\n" +
 	"\x10selected_file_id\x18\x02 \x01(\x03R\x0eselectedFileId\x12'\n" +
 	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\x12\x14\n" +
 	"\x05model\x18\x04 \x01(\tR\x05model\x12 \n" +
-	"\vcommunities\x18\x05 \x03(\tR\vcommunities\"\xea\x01\n" +
+	"\vcommunities\x18\x05 \x03(\tR\vcommunities\x12\x17\n" +
+	"\auser_id\x18\x06 \x01(\x03R\x06userId\"\x8b\x02\n" +
 	"\rQueryResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x16\n" +
 	"\x06answer\x18\x02 \x01(\tR\x06answer\x12'\n" +
@@ -289,13 +418,24 @@ const file_nia_proto_rawDesc = "" +
 	"error_code\x18\x05 \x01(\tR\terrorCode\x12\x16\n" +
 	"\x06detail\x18\x06 \x01(\tR\x06detail\x12\x1f\n" +
 	"\vresult_json\x18\a \x01(\fR\n" +
-	"resultJson\"\x0f\n" +
+	"resultJson\x12\x1f\n" +
+	"\vexchange_id\x18\b \x01(\tR\n" +
+	"exchangeId\"\x0f\n" +
 	"\rHealthRequest\"(\n" +
 	"\x0eHealthResponse\x12\x16\n" +
-	"\x06status\x18\x01 \x01(\tR\x06status2\x96\x01\n" +
+	"\x06status\x18\x01 \x01(\tR\x06status\"\x92\x01\n" +
+	"\x0eHistoryRequest\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\x03R\x06userId\x12(\n" +
+	"\x10selected_file_id\x18\x02 \x01(\x03R\x0eselectedFileId\x12'\n" +
+	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\x12\x14\n" +
+	"\x05limit\x18\x04 \x01(\x05R\x05limit\"2\n" +
+	"\x0fHistoryResponse\x12\x1f\n" +
+	"\vresult_json\x18\x01 \x01(\fR\n" +
+	"resultJson2\xe0\x01\n" +
 	"\tAssistant\x12B\n" +
 	"\x05Query\x12\x1b.nordik.nia.v1.QueryRequest\x1a\x1c.nordik.nia.v1.QueryResponse\x12E\n" +
-	"\x06Health\x12\x1c.nordik.nia.v1.HealthRequest\x1a\x1d.nordik.nia.v1.HealthResponseB(Z&nordik-drive-api/internal/nia/pb;niapbb\x06proto3"
+	"\x06Health\x12\x1c.nordik.nia.v1.HealthRequest\x1a\x1d.nordik.nia.v1.HealthResponse\x12H\n" +
+	"\aHistory\x12\x1d.nordik.nia.v1.HistoryRequest\x1a\x1e.nordik.nia.v1.HistoryResponseB(Z&nordik-drive-api/internal/nia/pb;niapbb\x06proto3"
 
 var (
 	file_nia_proto_rawDescOnce sync.Once
@@ -309,20 +449,24 @@ func file_nia_proto_rawDescGZIP() []byte {
 	return file_nia_proto_rawDescData
 }
 
-var file_nia_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_nia_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_nia_proto_goTypes = []any{
-	(*QueryRequest)(nil),   // 0: nordik.nia.v1.QueryRequest
-	(*QueryResponse)(nil),  // 1: nordik.nia.v1.QueryResponse
-	(*HealthRequest)(nil),  // 2: nordik.nia.v1.HealthRequest
-	(*HealthResponse)(nil), // 3: nordik.nia.v1.HealthResponse
+	(*QueryRequest)(nil),    // 0: nordik.nia.v1.QueryRequest
+	(*QueryResponse)(nil),   // 1: nordik.nia.v1.QueryResponse
+	(*HealthRequest)(nil),   // 2: nordik.nia.v1.HealthRequest
+	(*HealthResponse)(nil),  // 3: nordik.nia.v1.HealthResponse
+	(*HistoryRequest)(nil),  // 4: nordik.nia.v1.HistoryRequest
+	(*HistoryResponse)(nil), // 5: nordik.nia.v1.HistoryResponse
 }
 var file_nia_proto_depIdxs = []int32{
 	0, // 0: nordik.nia.v1.Assistant.Query:input_type -> nordik.nia.v1.QueryRequest
 	2, // 1: nordik.nia.v1.Assistant.Health:input_type -> nordik.nia.v1.HealthRequest
-	1, // 2: nordik.nia.v1.Assistant.Query:output_type -> nordik.nia.v1.QueryResponse
-	3, // 3: nordik.nia.v1.Assistant.Health:output_type -> nordik.nia.v1.HealthResponse
-	2, // [2:4] is the sub-list for method output_type
-	0, // [0:2] is the sub-list for method input_type
+	4, // 2: nordik.nia.v1.Assistant.History:input_type -> nordik.nia.v1.HistoryRequest
+	1, // 3: nordik.nia.v1.Assistant.Query:output_type -> nordik.nia.v1.QueryResponse
+	3, // 4: nordik.nia.v1.Assistant.Health:output_type -> nordik.nia.v1.HealthResponse
+	5, // 5: nordik.nia.v1.Assistant.History:output_type -> nordik.nia.v1.HistoryResponse
+	3, // [3:6] is the sub-list for method output_type
+	0, // [0:3] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
 	0, // [0:0] is the sub-list for extension extendee
 	0, // [0:0] is the sub-list for field type_name
@@ -339,7 +483,7 @@ func file_nia_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_nia_proto_rawDesc), len(file_nia_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

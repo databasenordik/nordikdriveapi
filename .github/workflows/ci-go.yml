@@ -13,7 +13,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.22"
+          go-version-file: go.mod
           cache: true
 
       - name: Dependencies
@@ -22,16 +22,41 @@ jobs:
       - name: Unit tests
         run: make test-unit
 
+      - name: Build and static checks
+        run: |
+          go build -o "$RUNNER_TEMP/nordik-drive-api" ./cmd/server
+          go vet ./...
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unit-coverage
+          path: coverage.unit.out
+
   integration:
     name: Integration tests (Go)
     runs-on: ubuntu-latest
     needs: unit
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: nordik_baseline_test
+          POSTGRES_USER: nordik_test
+          POSTGRES_PASSWORD: synthetic-test-only
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U nordik_test -d nordik_baseline_test"
+          --health-interval 2s --health-timeout 3s --health-retries 30
+    env:
+      TEST_DATABASE_URL: postgres://nordik_test:synthetic-test-only@127.0.0.1:55432/nordik_baseline_test?sslmode=disable
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.22"
+          go-version-file: go.mod
           cache: true
 
       - name: Dependencies
@@ -39,3 +64,12 @@ jobs:
 
       - name: Integration tests
         run: make test-integration
+
+      - name: Coverage summary
+        run: go tool cover -func=coverage.integration.out
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: combined-coverage
+          path: coverage.integration.out

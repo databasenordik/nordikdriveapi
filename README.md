@@ -102,7 +102,16 @@ make test-unit
 make test-integration
 ```
 
-Both targets currently run the same Go test command. They do not select separate test groups.
+`test-unit` runs the default suite and saves `coverage.unit.out`. `test-integration` runs the default tests plus the `integration`-tagged suites and saves `coverage.integration.out`. It requires the disposable PostgreSQL fixture:
+
+```bash
+docker compose -p nordik-baseline -f docker-compose.test.yml up -d --wait
+export TEST_DATABASE_URL='postgres://nordik_test:synthetic-test-only@127.0.0.1:55432/nordik_baseline_test?sslmode=disable'
+make test-integration
+docker compose -p nordik-baseline -f docker-compose.test.yml down
+```
+
+In PowerShell, set `$env:TEST_DATABASE_URL='...'`. See [the baseline guide](docs/baseline.md) for direct Go commands, coverage results, test isolation, and benchmarks. Tests never use application database settings as a fallback.
 
 To run the test command directly:
 

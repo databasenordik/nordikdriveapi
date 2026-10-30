@@ -1,7 +1,6 @@
 package logs
 
 import (
-	"encoding/json"
 	"math"
 	"nordik-drive-api/internal/util"
 	"sort"
@@ -17,15 +16,7 @@ type LogService struct {
 }
 
 func (ls *LogService) Log(log SystemLog, metadata interface{}) error {
-	var metaStr *string
-
-	// Convert metadata (map/struct) to JSON string if provided
-	if metadata != nil {
-		if b, err := json.Marshal(metadata); err == nil {
-			str := string(b)
-			metaStr = &str
-		}
-	}
+	metaStr := safeMetadata(metadata)
 
 	newLog := SystemLog{
 		Level:       log.Level,

@@ -1,17 +1,20 @@
 //go:build integration
 // +build integration
 
-package community
+package integration
 
 import (
 	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 
+	"nordik-drive-api/internal/community"
+
 	"github.com/gin-gonic/gin"
-	"gorm.io/driver/sqlite"
+	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
 
@@ -20,20 +23,26 @@ func setupRouterWithDB(t *testing.T, migrate bool) (*gin.Engine, *gorm.DB) {
 
 	gin.SetMode(gin.TestMode)
 
-	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "integration.db")), &gorm.Config{})
 	if err != nil {
-		t.Fatalf("failed to open sqlite in-memory db: %v", err)
+		t.Fatalf("failed to open isolated sqlite db: %v", err)
 	}
 
+	pool, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = pool.Close() })
+
 	if migrate {
-		if err := db.AutoMigrate(&Community{}); err != nil {
+		if err := db.AutoMigrate(&community.Community{}); err != nil {
 			t.Fatalf("failed to automigrate: %v", err)
 		}
 	}
 
-	svc := &CommunityService{DB: db}
+	svc := &community.CommunityService{DB: db}
 	r := gin.New()
-	RegisterRoutes(r, svc)
+	community.RegisterRoutes(r, svc)
 
 	return r, db
 }
@@ -50,8 +59,8 @@ func doRequest(r http.Handler, method, path string, body []byte) *httptest.Respo
 
 func TestCommunity_TableName_Coverage(t *testing.T) {
 	// ensures TableName() is covered
-	if (Community{}).TableName() != "communities" {
-		t.Fatalf("unexpected table name: %s", (Community{}).TableName())
+	if (community.Community{}).TableName() != "communities" {
+		t.Fatalf("unexpected table name: %s", (community.Community{}).TableName())
 	}
 }
 
@@ -64,8 +73,8 @@ func TestCommunity_GetAllCommunities_Empty_OK200(t *testing.T) {
 	}
 
 	var resp struct {
-		Message     string      `json:"message"`
-		Communities []Community `json:"communities"`
+		Message     string                `json:"message"`
+		Communities []community.Community `json:"communities"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to unmarshal response: %v body=%s", err, w.Body.String())
@@ -100,8 +109,8 @@ func TestCommunity_AddCommunities_Created201_ThenGet_OK200(t *testing.T) {
 	}
 
 	var resp struct {
-		Message     string      `json:"message"`
-		Communities []Community `json:"communities"`
+		Message     string                `json:"message"`
+		Communities []community.Community `json:"communities"`
 	}
 	if err := json.Unmarshal(w2.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to unmarshal response: %v body=%s", err, w2.Body.String())

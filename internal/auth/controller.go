@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"nordik-drive-api/config"
 	"nordik-drive-api/internal/logs"
+	"nordik-drive-api/internal/session"
 	"nordik-drive-api/internal/util"
 	"time"
 
@@ -70,7 +71,9 @@ func (ac *AuthController) SignUp(c *gin.Context) {
 		Communities: user.Community,
 	}
 
-	if err := ac.LS.Log(log, user); err != nil {
+	if err := ac.LS.Log(log, map[string]any{
+		"email": user.Email, "firstname": user.FirstName, "lastname": user.LastName,
+	}); err != nil {
 		fmt.Printf("Failed to insert log: %v\n", err)
 	}
 
@@ -167,7 +170,7 @@ func (ac *AuthController) Login(c *gin.Context) {
 	}
 
 	if ac.LS != nil {
-		if err := ac.LS.Log(log, req); err != nil {
+		if err := ac.LS.Log(log, map[string]any{"email": req.Email, "rememberMe": req.RememberMe}); err != nil {
 			fmt.Printf("Failed to insert log: %v\n", err)
 		}
 	}
@@ -219,19 +222,13 @@ func (ac *AuthController) Me(c *gin.Context) {
 		return
 	}
 
-	token, err := jwt.Parse(accessToken, func(token *jwt.Token) (interface{}, error) {
-		return []byte(cfg.JWTSecret), nil
-	})
-
-	if err != nil || !token.Valid {
+	claims, err := session.Validate(accessToken, cfg.JWTSecret)
+	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired token"})
 		return
 	}
 
-	claims := token.Claims.(jwt.MapClaims)
-	userID := int(claims["user_id"].(float64))
-
-	user, err := ac.AuthService.GetUserByID(userID)
+	user, err := ac.AuthService.GetUserByID(claims.UserID)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
 		return
@@ -259,35 +256,17 @@ func (ac *AuthController) Refresh(c *gin.Context) {
 		return
 	}
 
-	token, err := jwt.Parse(refreshToken, func(token *jwt.Token) (interface{}, error) {
-		return []byte(cfg.JWTSecret), nil
-	})
-
-	if err != nil || !token.Valid {
+	claims, err := session.Validate(refreshToken, cfg.JWTSecret)
+	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid refresh token"})
 		return
-	}
-
-	claims := token.Claims.(jwt.MapClaims)
-	userID := int(claims["user_id"].(float64))
-	raw, ok := claims["communities"]
-	var communities []string
-
-	if ok && raw != nil {
-		if arr, ok := raw.([]interface{}); ok {
-			for _, v := range arr {
-				if s, ok := v.(string); ok {
-					communities = append(communities, s)
-				}
-			}
-		}
 	}
 
 	// Generate new access token
 	accessExp := time.Now().Add(15 * time.Minute)
 	accessToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"user_id":     userID,
-		"communities": communities,
+		"user_id":     claims.UserID,
+		"communities": claims.Communities,
 		"exp":         accessExp.Unix(),
 	})
 	accessTokenString, _ := accessToken.SignedString([]byte(cfg.JWTSecret))
@@ -375,7 +354,7 @@ func (ac *AuthController) VerifyPassword(c *gin.Context) {
 		Communities: user.Community,
 	}
 
-	if err := ac.LS.Log(logs, req); err != nil {
+	if err := ac.LS.Log(logs, map[string]any{"email": user.Email}); err != nil {
 		fmt.Printf("Failed to insert log: %v\n", err)
 	}
 
@@ -416,7 +395,7 @@ func (ac *AuthController) SendOTP(c *gin.Context) {
 		Communities: user.Community,
 	}
 
-	if err := ac.LS.Log(logs, req); err != nil {
+	if err := ac.LS.Log(logs, map[string]any{"email": req.Email}); err != nil {
 		fmt.Printf("Failed to insert log: %v\n", err)
 	}
 
@@ -453,7 +432,7 @@ func (ac *AuthController) ResetPassword(c *gin.Context) {
 		Communities: user.Community,
 	}
 
-	if err := ac.LS.Log(logs, req); err != nil {
+	if err := ac.LS.Log(logs, map[string]any{"email": req.Email}); err != nil {
 		fmt.Printf("Failed to insert log: %v\n", err)
 	}
 

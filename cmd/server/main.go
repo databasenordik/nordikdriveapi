@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
 	"nordik-drive-api/config"
 	"nordik-drive-api/internal/admin"
@@ -26,34 +27,22 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"google.golang.org/genai"
-	"gorm.io/driver/postgres"
-	"gorm.io/gorm"
 )
 
 func main() {
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func run() error {
 	cfg := config.LoadConfig()
-
-	dsn := "host=" + cfg.DBHost +
-		" user=" + cfg.DBUser +
-		" password=" + cfg.DBPassword +
-		" dbname=" + cfg.DBName +
-		" port=" + cfg.DBPort +
-		" sslmode=disable"
-
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{PrepareStmt: true})
+	dependencies, err := initializeRuntime(context.Background(), cfg, openDatabase, genai.NewClient)
 	if err != nil {
-		log.Fatal("Failed to connect to database:", err)
+		return err
 	}
-	sqlDB, err := db.DB()
-	if err != nil {
-		log.Fatal("Failed to configure database pool:", err)
-	}
-	// Bound connection growth per Cloud Run instance while retaining enough warm
-	// connections for concurrent chat metadata and aggregate queries.
-	sqlDB.SetMaxOpenConns(25)
-	sqlDB.SetMaxIdleConns(10)
-	sqlDB.SetConnMaxIdleTime(5 * time.Minute)
-	sqlDB.SetConnMaxLifetime(30 * time.Minute)
+	defer dependencies.Pool.Close()
+	db := dependencies.DB
 	r := gin.Default()
 
 	r.Use(cors.New(cors.Config{
@@ -109,7 +98,7 @@ func main() {
 			AccountID: cfg.ZoomAccountID, ClientID: cfg.ZoomClientID, ClientSecret: cfg.ZoomClientSecret,
 		})
 		if err != nil {
-			log.Fatalf("invalid Zoom integration configuration: %v", err)
+			return errors.New("invalid Zoom integration configuration")
 		}
 		meetingProvider = zoomProvider
 	}
@@ -125,19 +114,10 @@ func main() {
 	logoContentService := logocontent.NewLogoContentService(db)
 	logocontent.RegisterRoutes(r, logoContentService)
 
-	// Create client with ADC (production)
-	ctx := context.Background()
-	client, err := genai.NewClient(ctx, &genai.ClientConfig{
-		Backend:  genai.BackendVertexAI,
-		Project:  "planar-ray-472112-e8", // <-- REPLACE with your Project ID
-		Location: "global",               // <-- REPLACE with your project location
-		// Note: No APIKey is needed when using Vertex AI with ADC.
-	})
-
-	chatService := &chat.ChatService{DB: db, Client: client}
+	chatService := &chat.ChatService{DB: db, Client: dependencies.Vertex}
 	chatBackend, closeChatBackend, err := chat.NewConfiguredChatBackend(chatService)
 	if err != nil {
-		log.Fatalf("invalid chat backend configuration: %v", err)
+		return errors.New("invalid chat backend configuration")
 	}
 	defer closeChatBackend()
 	chat.RegisterRoutes(r, chatService, chatBackend)
@@ -153,7 +133,7 @@ func main() {
 	// --- Cloud Run expects plain HTTP, on $PORT, bind to 0.0.0.0 ---
 	scheduler, err := jobs.NewScheduler(db, mailerService, honourService, supportScheduleService, appLocation, log.Default())
 	if err != nil {
-		log.Fatalf("failed to create scheduler: %v", err)
+		return errors.New("failed to create scheduler")
 	}
 
 	scheduler.Start()
@@ -164,7 +144,7 @@ func main() {
 		port = "8080"
 	}
 	log.Printf("Starting server on 0.0.0.0:%s ...", port)
-	log.Fatal(r.Run("0.0.0.0:" + port))
+	return r.Run("0.0.0.0:" + port)
 }
 
 func loadAppLocation(name string) *time.Location {

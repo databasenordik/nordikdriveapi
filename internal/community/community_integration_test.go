@@ -8,10 +8,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/driver/sqlite"
+	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
 
@@ -20,10 +21,16 @@ func setupRouterWithDB(t *testing.T, migrate bool) (*gin.Engine, *gorm.DB) {
 
 	gin.SetMode(gin.TestMode)
 
-	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "integration.db")), &gorm.Config{})
 	if err != nil {
-		t.Fatalf("failed to open sqlite in-memory db: %v", err)
+		t.Fatalf("failed to open isolated sqlite db: %v", err)
 	}
+
+	pool, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = pool.Close() })
 
 	if migrate {
 		if err := db.AutoMigrate(&Community{}); err != nil {

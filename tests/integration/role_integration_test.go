@@ -1,7 +1,7 @@
 //go:build integration
 // +build integration
 
-package role
+package integration
 
 import (
 	"bytes"
@@ -9,19 +9,21 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 
 	"nordik-drive-api/internal/auth"
+	"nordik-drive-api/internal/role"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/driver/sqlite"
+	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
 
 type mockRoleService struct {
 	getRoleByUserFn    func(userid int) ([]auth.UserRole, error)
 	getRolesByUserIdFn func(userid int) ([]auth.UserRole, error)
-	getAllRolesFn      func(uniqueRoles []string) ([]Role, error)
+	getAllRolesFn      func(uniqueRoles []string) ([]role.Role, error)
 	lastUniqueRolesArg []string
 }
 
@@ -39,7 +41,7 @@ func (m *mockRoleService) GetRolesByUserId(userid int) ([]auth.UserRole, error) 
 	return m.getRolesByUserIdFn(userid)
 }
 
-func (m *mockRoleService) GetAllRoles(uniqueRoles []string) ([]Role, error) {
+func (m *mockRoleService) GetAllRoles(uniqueRoles []string) ([]role.Role, error) {
 	m.lastUniqueRolesArg = append([]string(nil), uniqueRoles...)
 	if m.getAllRolesFn == nil {
 		return nil, nil
@@ -47,12 +49,12 @@ func (m *mockRoleService) GetAllRoles(uniqueRoles []string) ([]Role, error) {
 	return m.getAllRolesFn(uniqueRoles)
 }
 
-func setupControllerRouter(t *testing.T, svc RoleServiceAPI, withUserID bool, userID any) *gin.Engine {
+func setupControllerRouter(t *testing.T, svc role.RoleServiceAPI, withUserID bool, userID any) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 
 	r := gin.New()
-	rc := &RoleController{RoleService: svc}
+	rc := &role.RoleController{RoleService: svc}
 
 	// We mount routes WITHOUT the real AuthMiddleware so we can control c.Set("userID", ...)
 	r.GET("/api/role", func(c *gin.Context) {
@@ -130,7 +132,7 @@ func TestRoleController_GetAllRoles_500_WhenGetAllRolesFails(t *testing.T) {
 				{Role: "viewer"},
 			}, nil
 		},
-		getAllRolesFn: func(uniqueRoles []string) ([]Role, error) {
+		getAllRolesFn: func(uniqueRoles []string) ([]role.Role, error) {
 			return nil, errors.New("query failed")
 		},
 	}
@@ -152,9 +154,9 @@ func TestRoleController_GetAllRoles_200_Success_AndPassesUniqueRoles(t *testing.
 				{Role: "editor"},
 			}, nil
 		},
-		getAllRolesFn: func(uniqueRoles []string) ([]Role, error) {
+		getAllRolesFn: func(uniqueRoles []string) ([]role.Role, error) {
 			// Return some roles to prove success path
-			return []Role{
+			return []role.Role{
 				{ID: 1, Role: "viewer", Priority: 3, CanView: true},
 			}, nil
 		},
@@ -168,8 +170,8 @@ func TestRoleController_GetAllRoles_200_Success_AndPassesUniqueRoles(t *testing.
 
 	// Verify response schema
 	var resp struct {
-		Message string `json:"message"`
-		Roles   []Role `json:"roles"`
+		Message string      `json:"message"`
+		Roles   []role.Role `json:"roles"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("unmarshal failed: %v body=%s", err, w.Body.String())
@@ -230,8 +232,8 @@ func TestRoleController_GetRolesByUserId_200_Success(t *testing.T) {
 	svc := &mockRoleService{
 		getRolesByUserIdFn: func(userid int) ([]auth.UserRole, error) {
 			return []auth.UserRole{
-				{UserID: uint(userid), Role: "admin"},
-				{UserID: uint(userid), Role: "viewer"},
+				{UserID: userid, Role: "admin"},
+				{UserID: userid, Role: "viewer"},
 			}, nil
 		},
 	}
@@ -264,14 +266,20 @@ func TestRoleController_GetRolesByUserId_200_Success(t *testing.T) {
 func openTestDB(t *testing.T, migrate bool) *gorm.DB {
 	t.Helper()
 
-	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "integration.db")), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("failed to open sqlite: %v", err)
 	}
 
+	pool, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = pool.Close() })
+
 	if migrate {
 		// auth.UserRole must be a real model struct in your project.
-		if err := db.AutoMigrate(&Role{}, &auth.UserRole{}); err != nil {
+		if err := db.AutoMigrate(&role.Role{}, &auth.UserRole{}); err != nil {
 			t.Fatalf("failed to migrate: %v", err)
 		}
 	}
@@ -280,7 +288,7 @@ func openTestDB(t *testing.T, migrate bool) *gorm.DB {
 
 func TestRoleService_GetAllRoles_EmptyUniqueRoles_ReturnsEmpty(t *testing.T) {
 	db := openTestDB(t, true)
-	rs := &RoleService{DB: db}
+	rs := &role.RoleService{DB: db}
 
 	roles, err := rs.GetAllRoles(nil)
 	if err != nil {
@@ -293,9 +301,9 @@ func TestRoleService_GetAllRoles_EmptyUniqueRoles_ReturnsEmpty(t *testing.T) {
 
 func TestRoleService_GetAllRoles_ExcludesUniqueRoles(t *testing.T) {
 	db := openTestDB(t, true)
-	rs := &RoleService{DB: db}
+	rs := &role.RoleService{DB: db}
 
-	seed := []Role{
+	seed := []role.Role{
 		{Role: "admin", Priority: 1, CanUpload: true, CanView: true, CanApprove: true, CanApproveAll: true},
 		{Role: "viewer", Priority: 3, CanUpload: false, CanView: true, CanApprove: false, CanApproveAll: false},
 		{Role: "editor", Priority: 2, CanUpload: true, CanView: true, CanApprove: false, CanApproveAll: false},
@@ -317,7 +325,7 @@ func TestRoleService_GetAllRoles_ExcludesUniqueRoles(t *testing.T) {
 
 func TestRoleService_GetRolesByUserId_ReturnsRows(t *testing.T) {
 	db := openTestDB(t, true)
-	rs := &RoleService{DB: db}
+	rs := &role.RoleService{DB: db}
 
 	seed := []auth.UserRole{
 		{UserID: 55, Role: "admin"},
@@ -339,7 +347,7 @@ func TestRoleService_GetRolesByUserId_ReturnsRows(t *testing.T) {
 
 func TestRoleService_GetRolesByUserId_DBError_NoMigration(t *testing.T) {
 	db := openTestDB(t, false) // no tables
-	rs := &RoleService{DB: db}
+	rs := &role.RoleService{DB: db}
 
 	_, err := rs.GetRolesByUserId(1)
 	if err == nil {
@@ -349,7 +357,7 @@ func TestRoleService_GetRolesByUserId_DBError_NoMigration(t *testing.T) {
 
 func TestRoleService_GetAllRoles_DBError_NoMigration(t *testing.T) {
 	db := openTestDB(t, false) // no tables
-	rs := &RoleService{DB: db}
+	rs := &role.RoleService{DB: db}
 
 	_, err := rs.GetAllRoles([]string{"admin"})
 	if err == nil {
@@ -358,17 +366,17 @@ func TestRoleService_GetAllRoles_DBError_NoMigration(t *testing.T) {
 }
 
 /* -----------------------------
-   RegisterRoutes coverage
+   role.RegisterRoutes coverage
 ------------------------------ */
 
 func TestRole_RegisterRoutes_CoverageOnly(t *testing.T) {
-	// We only want to execute RegisterRoutes lines for coverage.
+	// We only want to execute role.RegisterRoutes lines for coverage.
 	// We are NOT testing AuthMiddleware here (that's in middlewares package).
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 
 	// DB can be nil because we won't actually serve requests through these routes.
-	RegisterRoutes(r, &RoleService{DB: nil})
+	role.RegisterRoutes(r, &role.RoleService{DB: nil})
 
 	// If we reached here without panic, routes registration is covered.
 }

@@ -1,10 +1,20 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"strconv"
 	"strings"
 )
+
+// ValidateServer checks required settings separately from environment loading.
+// This lets maintenance tools load only the configuration they need.
+func (cfg Config) ValidateServer() error {
+	if strings.TrimSpace(cfg.JWTSecret) == "" {
+		return errors.New("JWT_SECRET is required")
+	}
+	return nil
+}
 
 type Config struct {
 	DBHost                           string

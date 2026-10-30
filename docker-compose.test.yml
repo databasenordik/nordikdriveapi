@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: nordik_baseline_test
+      POSTGRES_USER: nordik_test
+      POSTGRES_PASSWORD: synthetic-test-only
+    ports:
+      - "127.0.0.1:55432:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nordik_test -d nordik_baseline_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 30

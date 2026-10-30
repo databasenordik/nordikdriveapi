@@ -1,12 +1,12 @@
 package middlewares
 
 import (
+	"errors"
 	"net/http"
 	"nordik-drive-api/config"
-	"strconv"
+	"nordik-drive-api/internal/session"
 
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
 )
 
 func AuthMiddleware() gin.HandlerFunc {
@@ -19,50 +19,20 @@ func AuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		token, err := jwt.Parse(accessToken, func(token *jwt.Token) (interface{}, error) {
-			return []byte(cfg.JWTSecret), nil
-		})
-
-		if err != nil || !token.Valid {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired token"})
-			c.Abort()
-			return
-		}
-
-		claims := token.Claims.(jwt.MapClaims)
-		userIDVal := claims["user_id"]
-		var userID float64
-		switch v := userIDVal.(type) {
-		case float64:
-			userID = v
-		case string:
-			f, err := strconv.ParseFloat(v, 64)
-			if err != nil {
-				c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user ID"})
-				c.Abort()
-				return
+		claims, err := session.Validate(accessToken, cfg.JWTSecret)
+		if err != nil {
+			message := "Invalid or expired token"
+			if errors.Is(err, session.ErrInvalidUserID) {
+				message = "invalid user ID"
 			}
-			userID = f
-		default:
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user ID"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": message})
 			c.Abort()
 			return
 		}
-
-		raw := claims["communities"]
 
 		communities := []string{}
-		if raw != nil {
-			if arr, ok := raw.([]interface{}); ok {
-				for _, v := range arr {
-					if s, ok := v.(string); ok && s != "" {
-						communities = append(communities, s)
-					}
-				}
-			}
-		}
-
-		c.Set("userID", userID)
+		communities = append(communities, claims.Communities...)
+		c.Set("userID", float64(claims.UserID))
 		c.Set("communities", communities)
 		c.Next()
 	}

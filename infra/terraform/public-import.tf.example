@@ -1,0 +1,6 @@
+# Enable only for cutover, after the compatible API uses secret references,
+# the complete consumer budget is verified and the serving revision is pinned.
+import {
+  to = google_cloud_run_v2_service.gateway["public"]
+  id = "projects/planar-ray-472112-e8/locations/us-west1/services/nordikdriveapi"
+}

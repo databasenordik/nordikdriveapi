@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"nordik-drive-api/internal/logs"
 	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+
+	"nordik-drive-api/internal/logs"
 )
 
 type FileController struct {
@@ -29,6 +30,7 @@ type ReplaceFileInput struct {
 }
 
 func (fc *FileController) UploadFiles(c *gin.Context) {
+	fc = fc.withContext(c.Request.Context())
 	// parse multipart form
 	form, err := c.MultipartForm()
 	if err != nil {
@@ -118,6 +120,7 @@ func validateUploadInputCounts(fileCount int, input FileUploadInput) error {
 }
 
 func (fc *FileController) GetAllFiles(c *gin.Context) {
+	fc = fc.withContext(c.Request.Context())
 	userIDVal, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "user ID not found"})
@@ -159,6 +162,7 @@ func (fc *FileController) GetAllFiles(c *gin.Context) {
 // }
 
 func (fc *FileController) GetFileData(c *gin.Context) {
+	fc = fc.withContext(c.Request.Context())
 	userIDVal, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "user ID not found"})
@@ -229,6 +233,7 @@ func (fc *FileController) GetFileData(c *gin.Context) {
 }
 
 func (fc *FileController) GetNormalizedFileData(c *gin.Context) {
+	fc = fc.withContext(c.Request.Context())
 	userIDVal, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "user ID not found"})
@@ -296,6 +301,7 @@ func (fc *FileController) GetNormalizedFileData(c *gin.Context) {
 }
 
 func (fc *FileController) SyncNormalizedFileData(c *gin.Context) {
+	fc = fc.withContext(c.Request.Context())
 	userIDVal, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "user ID not found"})
@@ -379,6 +385,7 @@ func syncNormalizedLogTarget(fileName string, version int) string {
 }
 
 func (fc *FileController) DeleteFile(c *gin.Context) {
+	fc = fc.withContext(c.Request.Context())
 	userIDVal, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "user ID not found"})
@@ -437,6 +444,7 @@ func (fc *FileController) DeleteFile(c *gin.Context) {
 }
 
 func (fc *FileController) ResetFile(c *gin.Context) {
+	fc = fc.withContext(c.Request.Context())
 	userIDVal, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "user ID not found"})
@@ -495,6 +503,7 @@ func (fc *FileController) ResetFile(c *gin.Context) {
 }
 
 func (fc *FileController) CreateAccess(c *gin.Context) {
+	fc = fc.withContext(c.Request.Context())
 	userIDVal, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "user ID not found"})
@@ -550,6 +559,7 @@ func (fc *FileController) CreateAccess(c *gin.Context) {
 }
 
 func (fc *FileController) DeleteAccess(c *gin.Context) {
+	fc = fc.withContext(c.Request.Context())
 	userIDVal, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "user ID not found"})
@@ -609,6 +619,7 @@ type FileAccessWithUser struct {
 }
 
 func (fc *FileController) GetAllAccess(c *gin.Context) {
+	fc = fc.withContext(c.Request.Context())
 	userIDVal, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "user ID not found"})
@@ -640,6 +651,7 @@ func (fc *FileController) GetAllAccess(c *gin.Context) {
 }
 
 func (fc *FileController) GetFileHistory(c *gin.Context) {
+	fc = fc.withContext(c.Request.Context())
 	userIDVal, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "user ID not found"})
@@ -671,6 +683,7 @@ func (fc *FileController) GetFileHistory(c *gin.Context) {
 }
 
 func (fc *FileController) ReplaceFile(c *gin.Context) {
+	fc = fc.withContext(c.Request.Context())
 	userIDVal, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "user ID not found"})
@@ -736,6 +749,7 @@ func (fc *FileController) ReplaceFile(c *gin.Context) {
 }
 
 func (fc *FileController) RevertFile(c *gin.Context) {
+	fc = fc.withContext(c.Request.Context())
 	var input RevertFileInput
 	userIDVal, exists := c.Get("userID")
 	if !exists {
@@ -796,6 +810,7 @@ func (fc *FileController) RevertFile(c *gin.Context) {
 }
 
 func (fc *FileController) CreateEditRequest(c *gin.Context) {
+	fc = fc.withContext(c.Request.Context())
 	var input EditRequestInput
 
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -836,6 +851,7 @@ func (fc *FileController) CreateEditRequest(c *gin.Context) {
 // CreateAchieverStoryRequest accepts proposed text, an uploaded/linked video,
 // PDF, or Word story. The story remains pending until an administrator reviews it.
 func (fc *FileController) CreateAchieverStoryRequest(c *gin.Context) {
+	fc = fc.withContext(c.Request.Context())
 	var input AchieverStoryRequestInput
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -870,6 +886,7 @@ func (fc *FileController) CreateAchieverStoryRequest(c *gin.Context) {
 }
 
 func (fc *FileController) GetEditRequests(c *gin.Context) {
+	fc = fc.withContext(c.Request.Context())
 	_, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "user ID not found"})
@@ -908,6 +925,7 @@ func (fc *FileController) GetEditRequests(c *gin.Context) {
 }
 
 func (fc *FileController) ReviewEditRequest(c *gin.Context) {
+	fc = fc.withContext(c.Request.Context())
 	userIDVal, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "user ID not found"})
@@ -960,6 +978,7 @@ func (fc *FileController) ReviewEditRequest(c *gin.Context) {
 
 // POST /api/file/photos/review
 func (fc *FileController) ReviewPhotos(c *gin.Context) {
+	fc = fc.withContext(c.Request.Context())
 	userIDVal, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "user ID not found"})
@@ -990,6 +1009,7 @@ func (fc *FileController) ReviewPhotos(c *gin.Context) {
 }
 
 func (fc *FileController) GetPhotosByRequest(c *gin.Context) {
+	fc = fc.withContext(c.Request.Context())
 	requestIDParam := c.Param("requestId")
 	requestIDInt, err := strconv.Atoi(requestIDParam)
 	if err != nil {
@@ -1011,6 +1031,7 @@ func (fc *FileController) GetPhotosByRequest(c *gin.Context) {
 }
 
 func (fc *FileController) GetDocsByRequest(c *gin.Context) {
+	fc = fc.withContext(c.Request.Context())
 	requestIDParam := c.Param("requestId")
 	requestIDInt, err := strconv.Atoi(requestIDParam)
 	if err != nil {
@@ -1032,6 +1053,7 @@ func (fc *FileController) GetDocsByRequest(c *gin.Context) {
 }
 
 func (fc *FileController) GetPhotosByRow(c *gin.Context) {
+	fc = fc.withContext(c.Request.Context())
 	rowIDParam := c.Param("rowId")
 	rowIDInt, err := strconv.Atoi(rowIDParam)
 	if err != nil {
@@ -1053,6 +1075,7 @@ func (fc *FileController) GetPhotosByRow(c *gin.Context) {
 }
 
 func (fc *FileController) GetDocsByRow(c *gin.Context) {
+	fc = fc.withContext(c.Request.Context())
 	rowIDParam := c.Param("rowId")
 	rowIDInt, err := strconv.Atoi(rowIDParam)
 	if err != nil {
@@ -1076,6 +1099,7 @@ func (fc *FileController) GetDocsByRow(c *gin.Context) {
 // GetAchieverStoriesByRow returns approved survivor/achiever stories for one
 // master-list row. Stories may be documents, text, or videos.
 func (fc *FileController) GetAchieverStoriesByRow(c *gin.Context) {
+	fc = fc.withContext(c.Request.Context())
 	rowID, err := strconv.ParseUint(c.Param("rowId"), 10, 64)
 	if err != nil || rowID == 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid row ID"})
@@ -1092,6 +1116,7 @@ func (fc *FileController) GetAchieverStoriesByRow(c *gin.Context) {
 }
 
 func (fc *FileController) GetPhoto(c *gin.Context) {
+	fc = fc.withContext(c.Request.Context())
 	photoIDParam := c.Param("photoId")
 	photoID, err := strconv.Atoi(photoIDParam)
 	if err != nil {
@@ -1110,6 +1135,7 @@ func (fc *FileController) GetPhoto(c *gin.Context) {
 }
 
 func (fc *FileController) GetDoc(c *gin.Context) {
+	fc = fc.withContext(c.Request.Context())
 	docIDParam := c.Param("docId")
 	docID, err := strconv.Atoi(docIDParam)
 	if err != nil {
@@ -1149,6 +1175,7 @@ func sanitizeFilename(name string) string {
 }
 
 func (fc *FileController) DownloadMediaByID(c *gin.Context) {
+	fc = fc.withContext(c.Request.Context())
 	idStr := c.Param("id")
 	id64, err := strconv.ParseUint(idStr, 10, 64)
 	if err != nil || id64 == 0 {
@@ -1197,6 +1224,7 @@ func (fc *FileController) DownloadMediaByID(c *gin.Context) {
 // DownloadAchieverStory streams a stored PDF/document. Text and video stories
 // are returned by GetAchieverStoriesByRow and are rendered directly by the UI.
 func (fc *FileController) DownloadAchieverStory(c *gin.Context) {
+	fc = fc.withContext(c.Request.Context())
 	id, err := strconv.ParseUint(c.Param("storyId"), 10, 64)
 	if err != nil || id == 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid story id"})
@@ -1228,6 +1256,7 @@ func (fc *FileController) DownloadAchieverStory(c *gin.Context) {
 // preview a submitted document while it is still pending. The public story
 // download route above remains approved-only.
 func (fc *FileController) DownloadRequestedAchieverStory(c *gin.Context) {
+	fc = fc.withContext(c.Request.Context())
 	id, err := strconv.ParseUint(c.Param("storyId"), 10, 64)
 	if err != nil || id == 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid story id"})

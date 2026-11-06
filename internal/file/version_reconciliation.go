@@ -10,11 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"nordik-drive-api/internal/dataconfig"
-
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+
+	"nordik-drive-api/internal/dataconfig"
+	"nordik-drive-api/internal/requestscope"
 )
 
 const (
@@ -640,7 +641,7 @@ func startVersionReconciliationHeartbeat(db *gorm.DB, jobID uint) *versionReconc
 		return &versionReconciliationHeartbeat{}
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(requestscope.Context(db))
 	heartbeat := &versionReconciliationHeartbeat{
 		cancel: cancel,
 		done:   make(chan struct{}),

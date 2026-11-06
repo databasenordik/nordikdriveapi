@@ -11,6 +11,7 @@ type CommunityController struct {
 }
 
 func (cc *CommunityController) GetAllCommunities(c *gin.Context) {
+	cc = cc.withContext(c.Request.Context())
 	communities, err := cc.CommunityService.GetAllCommunities()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -24,6 +25,7 @@ func (cc *CommunityController) GetAllCommunities(c *gin.Context) {
 }
 
 func (cc *CommunityController) AddCommunities(c *gin.Context) {
+	cc = cc.withContext(c.Request.Context())
 	var req struct {
 		Communities []string `json:"communities" binding:"required"`
 	}

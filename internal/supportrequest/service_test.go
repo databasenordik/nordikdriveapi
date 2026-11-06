@@ -1,6 +1,7 @@
 package supportrequest
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -62,7 +63,7 @@ func TestCreateSupportRequestCreatesRecordAndNotification(t *testing.T) {
 	}()
 
 	supportRequestGoHook = func(fn func()) { fn() }
-	uploadSupportRequestScreenshotHook = func(base64Data, bucketName, objectName string) (string, int64, error) {
+	uploadSupportRequestScreenshotHook = func(_ context.Context, base64Data, bucketName, objectName string) (string, int64, error) {
 		if !strings.HasPrefix(objectName, "support_requests/7/") {
 			t.Fatalf("unexpected object path: %q", objectName)
 		}

@@ -25,7 +25,11 @@ jobs:
       - name: Build and static checks
         run: |
           go build -o "$RUNNER_TEMP/nordik-drive-api" ./cmd/server
+          go build -o "$RUNNER_TEMP/nordik-gateway" ./cmd/gateway
           go vet ./...
+
+      - name: Race checks for concurrent platform boundaries
+        run: go test -race ./internal/gateway ./internal/circuit ./internal/jobs ./internal/database ./internal/requestscope ./internal/mailer ./internal/workload ./internal/observability ./internal/chat
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -65,11 +69,40 @@ jobs:
       - name: Integration tests
         run: make test-integration
 
+      - name: Real Envoy routing, uploads and failure handling
+        run: go test -tags=integration,envoyintegration ./tests/integration -run '^TestEnvoyServiceRoutingAndStreaming$' -count=1
+
       - name: Coverage summary
         run: go tool cover -func=coverage.integration.out
+
+      - name: New platform core coverage
+        run: python3 scripts/check-platform-coverage.py coverage.integration.out
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: combined-coverage
           path: coverage.integration.out
+
+  terraform:
+    name: Terraform validation and mock safety tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inventory artifact credential redaction
+        run: python3 -m unittest discover -s scripts -p 'test_milestone2_*.py'
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.13.5
+      - run: terraform fmt -check -recursive
+        working-directory: infra/terraform
+      - run: terraform init -backend=false -input=false
+        working-directory: infra/terraform
+      - run: terraform validate
+        working-directory: infra/terraform
+      - run: terraform test -filter=tests/safety.tftest.hcl
+        working-directory: infra/terraform
+      - run: terraform test -filter=tests/small_database.tftest.hcl -var-file=tests/fixtures/small-db.tfvars.example
+        working-directory: infra/terraform
+      - run: terraform test -filter=tests/rollout.tftest.hcl
+        working-directory: infra/terraform

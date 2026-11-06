@@ -4,30 +4,37 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
+
+	"nordik-drive-api/internal/circuit"
 	niapb "nordik-drive-api/internal/nia/pb"
+	"nordik-drive-api/internal/workload"
 )
 
 type niaChatBackend struct {
 	service *ChatService
 	client  niapb.AssistantClient
 	timeout time.Duration
+	breaker circuit.Breaker
 }
 
-// A single gRPC connection is reused across requests. No identity token is attached.
+// One connection and one refresh-capable token source are reused across requests.
 func NewConfiguredChatBackend(service *ChatService) (ChatBackend, func(), error) {
 	enabled, err := envBool("CHAT_USE_NIA", false)
 	if err != nil || !enabled {
@@ -52,7 +59,34 @@ func NewConfiguredChatBackend(service *ChatService) (ChatBackend, func(), error)
 	if useTLS {
 		transport = credentials.NewTLS(&tls.Config{MinVersion: tls.VersionTLS12})
 	}
-	conn, err := grpc.NewClient(target, grpc.WithTransportCredentials(transport))
+	options := []grpc.DialOption{grpc.WithTransportCredentials(transport), grpc.WithStatsHandler(otelgrpc.NewClientHandler())}
+	mode := strings.TrimSpace(os.Getenv("NIA_AUTH_MODE"))
+	if mode == "" {
+		if useTLS {
+			mode = "iam"
+		} else {
+			mode = "none"
+		}
+	}
+	if mode == "iam" {
+		if !useTLS {
+			return nil, nil, fmt.Errorf("NIA IAM authentication requires TLS")
+		}
+		source, sourceErr := workload.Source(context.Background(), os.Getenv("NIA_TOKEN_AUDIENCE"))
+		if sourceErr != nil {
+			return nil, nil, sourceErr
+		}
+		options = append(options, grpc.WithPerRPCCredentials(workload.Credentials{Source: source}))
+	} else if mode == "none" {
+		host, _, splitErr := net.SplitHostPort(target)
+		ip := net.ParseIP(host)
+		if splitErr != nil || (host != "localhost" && (ip == nil || !ip.IsLoopback())) {
+			return nil, nil, fmt.Errorf("unauthenticated NIA is allowed only on loopback fixtures")
+		}
+	} else {
+		return nil, nil, fmt.Errorf("NIA_AUTH_MODE must be iam or none")
+	}
+	conn, err := grpc.NewClient(target, options...)
 	if err != nil {
 		return nil, nil, fmt.Errorf("configure NIA gRPC: %w", err)
 	}
@@ -78,7 +112,7 @@ func (b *niaChatBackend) Chat(ctx context.Context, question string, audio *multi
 	}
 	ctx, cancel := context.WithTimeout(ctx, b.timeout)
 	defer cancel()
-	file, err := b.service.lookupChatFile(filename)
+	file, err := b.service.WithContext(ctx).(*ChatService).lookupChatFile(filename)
 	if err != nil {
 		return nil, &ChatHTTPError{Status: http.StatusBadRequest, Message: err.Error()}
 	}
@@ -104,9 +138,14 @@ func (b *niaChatBackend) Chat(ctx context.Context, question string, audio *multi
 	if question == "" {
 		return nil, &ChatHTTPError{Status: http.StatusBadRequest, Message: "question or audio is required"}
 	}
+	ticket, retry := b.breaker.Allow()
+	if retry > 0 {
+		return nil, breakerError(retry)
+	}
 	reply, err := b.client.Query(ctx, &niapb.QueryRequest{
 		Question: question, SelectedFileId: int64(file.ID), Communities: communities, ConversationId: conversationID, UserId: userID,
 	})
+	b.record(ticket, ctx, niaAvailabilityFailure(ctx, err) || reply.GetStatus() == "planner_unavailable" || reply.GetStatus() == "planner_failed")
 	if err != nil {
 		return nil, mapNIAError(err)
 	}
@@ -129,9 +168,14 @@ func (b *niaChatBackend) Chat(ctx context.Context, question string, audio *multi
 func (b *niaChatBackend) History(ctx context.Context, userID int64, fileID uint, conversationID string, limit int) (json.RawMessage, error) {
 	ctx, cancel := context.WithTimeout(ctx, b.timeout)
 	defer cancel()
+	ticket, retry := b.breaker.Allow()
+	if retry > 0 {
+		return nil, breakerError(retry)
+	}
 	reply, err := b.client.History(ctx, &niapb.HistoryRequest{
 		UserId: userID, SelectedFileId: int64(fileID), ConversationId: conversationID, Limit: int32(limit),
 	})
+	b.record(ticket, ctx, niaAvailabilityFailure(ctx, err))
 	if err != nil {
 		return nil, mapNIAError(err)
 	}
@@ -139,6 +183,16 @@ func (b *niaChatBackend) History(ctx context.Context, userID int64, fileID uint,
 		return nil, &ChatHTTPError{Status: http.StatusBadGateway, Message: "NIA returned invalid history"}
 	}
 	return json.RawMessage(reply.ResultJson), nil
+}
+
+func niaAvailabilityFailure(ctx context.Context, err error) bool {
+	if errors.Is(ctx.Err(), context.Canceled) {
+		return false
+	}
+	return status.Code(err) == codes.Unavailable || status.Code(err) == codes.DeadlineExceeded || status.Code(err) == codes.Internal
+}
+func breakerError(retry time.Duration) *ChatHTTPError {
+	return &ChatHTTPError{Status: 503, Message: "NIA not available at the moment. Please try again after some time.", RetryAfter: int(retry.Seconds()) + 1}
 }
 
 func mapNIAError(err error) error {
@@ -158,4 +212,12 @@ func mapNIAError(err error) error {
 	default:
 		return &ChatHTTPError{Status: http.StatusBadGateway, Message: "NIA request failed"}
 	}
+}
+
+func (b *niaChatBackend) record(ticket circuit.Ticket, ctx context.Context, failure bool) {
+	if errors.Is(ctx.Err(), context.Canceled) {
+		b.breaker.Exclude(ticket)
+		return
+	}
+	b.breaker.Record(ticket, failure)
 }

@@ -4,11 +4,12 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"nordik-drive-api/internal/util"
 	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+
+	"nordik-drive-api/internal/util"
 )
 
 type ChatController struct {
@@ -25,6 +26,7 @@ func NewChatController(cs *ChatService, backends ...ChatBackend) *ChatController
 }
 
 func (cc *ChatController) Chat(c *gin.Context) {
+	cc = cc.withContext(c.Request.Context())
 	question := c.PostForm("question")
 	filename := c.PostForm("filename")
 	audioFile, _ := c.FormFile("audio")
@@ -53,6 +55,9 @@ func (cc *ChatController) Chat(c *gin.Context) {
 		var upstream *ChatHTTPError
 		if errors.As(err, &upstream) {
 			statusCode = upstream.Status
+			if upstream.RetryAfter > 0 {
+				c.Header("Retry-After", strconv.Itoa(upstream.RetryAfter))
+			}
 		}
 		c.JSON(statusCode, gin.H{"error": err.Error()})
 		return
@@ -76,6 +81,7 @@ func (cc *ChatController) Chat(c *gin.Context) {
 }
 
 func (cc *ChatController) Describe(c *gin.Context) {
+	cc = cc.withContext(c.Request.Context())
 	idStr := strings.TrimSpace(c.Param("id"))
 	if idStr == "" {
 		idStr = strings.TrimSpace(c.Query("id"))
@@ -100,6 +106,7 @@ func (cc *ChatController) Describe(c *gin.Context) {
 }
 
 func (cc *ChatController) TTS(c *gin.Context) {
+	cc = cc.withContext(c.Request.Context())
 	text := strings.TrimSpace(c.PostForm("text"))
 	if text == "" {
 		text = strings.TrimSpace(c.PostForm("answer"))

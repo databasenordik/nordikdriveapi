@@ -9,6 +9,8 @@ import (
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+
+	"nordik-drive-api/internal/requestscope"
 )
 
 var ErrMeetingUnavailable = errors.New("Zoom meeting is not ready")
@@ -63,7 +65,7 @@ func (s *Service) syncZoomMeeting(callID uint) error {
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	ctx, cancel := context.WithTimeout(requestscope.Context(s.DB), 25*time.Second)
 	defer cancel()
 
 	var syncErr error
@@ -250,7 +252,7 @@ func (s *Service) StartZoomMeeting(actorID, callID uint) (*ZoomStartURLResponse,
 		}
 		s.notifyZoomMeetingReady(call.SupportRequestID)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	ctx, cancel := context.WithTimeout(requestscope.Context(s.DB), 25*time.Second)
 	defer cancel()
 	startURL, err := s.MeetingProvider.StartURL(ctx, call.ZoomMeetingID)
 	if errors.Is(err, ErrMeetingNotFound) {

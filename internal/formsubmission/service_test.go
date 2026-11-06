@@ -4,13 +4,14 @@ import (
 	"context"
 	"errors"
 	"io"
-	filehelper "nordik-drive-api/internal/file"
-	"nordik-drive-api/internal/mailer"
 	"strings"
 	"testing"
 	"time"
 
 	"gorm.io/gorm"
+
+	filehelper "nordik-drive-api/internal/file"
+	"nordik-drive-api/internal/mailer"
 )
 
 func TestParseRequiredInt64Query(t *testing.T) {
@@ -185,7 +186,7 @@ func TestUploadFormFiles(t *testing.T) {
 		old := uploadBase64ToGCSHook
 		defer func() { uploadBase64ToGCSHook = old }()
 
-		uploadBase64ToGCSHook = func(dataBase64, bucket, objectName string) (string, int64, error) {
+		uploadBase64ToGCSHook = func(_ context.Context, dataBase64, bucket, objectName string) (string, int64, error) {
 			return "", 0, errors.New("upload failed")
 		}
 
@@ -211,7 +212,7 @@ func TestUploadFormFiles(t *testing.T) {
 
 		var gotObject string
 
-		uploadBase64ToGCSHook = func(dataBase64, bucket, objectName string) (string, int64, error) {
+		uploadBase64ToGCSHook = func(_ context.Context, dataBase64, bucket, objectName string) (string, int64, error) {
 			gotObject = objectName
 			return "gs://" + bucket + "/" + objectName, 123, nil
 		}

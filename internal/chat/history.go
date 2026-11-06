@@ -30,6 +30,7 @@ func chatUserID(c *gin.Context) (int64, bool) {
 
 // History reads the existing NIA conversation/messages through gRPC.
 func (cc *ChatController) History(c *gin.Context) {
+	cc = cc.withContext(c.Request.Context())
 	userID, ok := chatUserID(c)
 	if !ok {
 		return
@@ -70,6 +71,9 @@ func (cc *ChatController) History(c *gin.Context) {
 		statusCode := http.StatusBadGateway
 		if upstream, ok := err.(*ChatHTTPError); ok {
 			statusCode = upstream.Status
+			if upstream.RetryAfter > 0 {
+				c.Header("Retry-After", strconv.Itoa(upstream.RetryAfter))
+			}
 		}
 		c.JSON(statusCode, gin.H{"error": err.Error()})
 		return

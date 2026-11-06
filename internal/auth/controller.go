@@ -3,15 +3,16 @@ package auth
 import (
 	"fmt"
 	"net/http"
-	"nordik-drive-api/config"
-	"nordik-drive-api/internal/logs"
-	"nordik-drive-api/internal/session"
-	"nordik-drive-api/internal/util"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/lib/pq"
+
+	"nordik-drive-api/config"
+	"nordik-drive-api/internal/logs"
+	"nordik-drive-api/internal/session"
+	"nordik-drive-api/internal/util"
 )
 
 type AuthController struct {
@@ -22,6 +23,7 @@ type AuthController struct {
 var hash = util.HashPassword
 
 func (ac *AuthController) SignUp(c *gin.Context) {
+	ac = ac.withContext(c.Request.Context())
 	var req struct {
 		FirstName string   `json:"firstname" binding:"required"`
 		LastName  string   `json:"lastname" binding:"required"`
@@ -96,6 +98,7 @@ type LoginRequest struct {
 }
 
 func (ac *AuthController) Login(c *gin.Context) {
+	ac = ac.withContext(c.Request.Context())
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -189,6 +192,7 @@ func (ac *AuthController) Login(c *gin.Context) {
 }
 
 func (ac *AuthController) Logout(c *gin.Context) {
+	ac = ac.withContext(c.Request.Context())
 	accessCookie := &http.Cookie{
 		Name:     "access_token",
 		Value:    "",
@@ -214,6 +218,7 @@ func (ac *AuthController) Logout(c *gin.Context) {
 }
 
 func (ac *AuthController) Me(c *gin.Context) {
+	ac = ac.withContext(c.Request.Context())
 	cfg := config.LoadConfig()
 
 	accessToken, err := c.Cookie("access_token")
@@ -248,6 +253,7 @@ func (ac *AuthController) Me(c *gin.Context) {
 
 // Refresh endpoint to generate new access token
 func (ac *AuthController) Refresh(c *gin.Context) {
+	ac = ac.withContext(c.Request.Context())
 	cfg := config.LoadConfig()
 
 	refreshToken, err := c.Cookie("refresh_token")
@@ -288,6 +294,7 @@ func (ac *AuthController) Refresh(c *gin.Context) {
 }
 
 func (ac *AuthController) GetUsers(c *gin.Context) {
+	ac = ac.withContext(c.Request.Context())
 
 	userIDVal, exists := c.Get("userID")
 	if !exists {
@@ -314,6 +321,7 @@ func (ac *AuthController) GetUsers(c *gin.Context) {
 }
 
 func (ac *AuthController) VerifyPassword(c *gin.Context) {
+	ac = ac.withContext(c.Request.Context())
 	var req VerifyPasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -367,6 +375,7 @@ func (ac *AuthController) VerifyPassword(c *gin.Context) {
 }
 
 func (ac *AuthController) SendOTP(c *gin.Context) {
+	ac = ac.withContext(c.Request.Context())
 	var req SendOTPRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -404,6 +413,7 @@ func (ac *AuthController) SendOTP(c *gin.Context) {
 
 // POST /api/user/reset-password
 func (ac *AuthController) ResetPassword(c *gin.Context) {
+	ac = ac.withContext(c.Request.Context())
 	var req ResetPasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

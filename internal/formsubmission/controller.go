@@ -4,11 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	filehelper "nordik-drive-api/internal/file"
 	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+
+	filehelper "nordik-drive-api/internal/file"
 )
 
 type FormSubmissionController struct {
@@ -17,6 +18,7 @@ type FormSubmissionController struct {
 
 // GET /api/form/answers?id=...
 func (cc *FormSubmissionController) GetFormSubmission(c *gin.Context) {
+	cc = cc.withContext(c.Request.Context())
 	id, err := parseRequiredInt64Query(c.Query("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "valid id is required"})
@@ -38,6 +40,7 @@ func (cc *FormSubmissionController) GetFormSubmission(c *gin.Context) {
 
 // GET /api/form/answers/active?row_id=...&form_key=...&file_id=...
 func (cc *FormSubmissionController) GetActiveFormSubmission(c *gin.Context) {
+	cc = cc.withContext(c.Request.Context())
 	rowID, err := parseRequiredInt64Query(c.Query("row_id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "valid row_id is required"})
@@ -77,6 +80,7 @@ func (cc *FormSubmissionController) GetActiveFormSubmission(c *gin.Context) {
 
 // POST /api/form/answers
 func (cc *FormSubmissionController) SaveFormSubmission(c *gin.Context) {
+	cc = cc.withContext(c.Request.Context())
 	userIDVal, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "user ID not found"})
@@ -111,6 +115,7 @@ func (cc *FormSubmissionController) SaveFormSubmission(c *gin.Context) {
 }
 
 func (cc *FormSubmissionController) GetUpload(c *gin.Context) {
+	cc = cc.withContext(c.Request.Context())
 	userIDVal, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "user ID not found"})
@@ -145,6 +150,7 @@ func (cc *FormSubmissionController) GetUpload(c *gin.Context) {
 }
 
 func (cc *FormSubmissionController) SearchFormSubmissions(c *gin.Context) {
+	cc = cc.withContext(c.Request.Context())
 	userIDVal, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "user ID not found"})
@@ -235,6 +241,7 @@ func parseRequiredInt64Query(v string) (int64, error) {
 }
 
 func (cc *FormSubmissionController) GetFormsByFileID(c *gin.Context) {
+	cc = cc.withContext(c.Request.Context())
 	fileID, err := parseRequiredInt64Query(c.Query("file_id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "valid file_id is required"})
@@ -251,6 +258,7 @@ func (cc *FormSubmissionController) GetFormsByFileID(c *gin.Context) {
 }
 
 func (cc *FormSubmissionController) ReviewFormSubmission(c *gin.Context) {
+	cc = cc.withContext(c.Request.Context())
 	userIDVal, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "user ID not found"})
@@ -290,6 +298,7 @@ func (cc *FormSubmissionController) ReviewFormSubmission(c *gin.Context) {
 }
 
 func (cc *FormSubmissionController) SearchMyFormSubmissions(c *gin.Context) {
+	cc = cc.withContext(c.Request.Context())
 	userIDVal, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "user ID not found"})

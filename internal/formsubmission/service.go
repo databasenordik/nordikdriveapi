@@ -7,18 +7,19 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	filehelper "nordik-drive-api/internal/file"
 	"path"
 	"strings"
 	"sync"
 	"time"
 
-	"nordik-drive-api/internal/mailer"
-	"nordik-drive-api/internal/util"
-
 	"cloud.google.com/go/storage"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
+
+	filehelper "nordik-drive-api/internal/file"
+	"nordik-drive-api/internal/mailer"
+	"nordik-drive-api/internal/requestscope"
+	"nordik-drive-api/internal/util"
 )
 
 type FormSubmissionService struct {
@@ -26,7 +27,7 @@ type FormSubmissionService struct {
 	Mailer mailer.EmailSender
 }
 
-var uploadBase64ToGCSHook = util.UploadPhotoToGCS
+var uploadBase64ToGCSHook = util.UploadPhotoToGCSContext
 var newFormSubmissionGCSClientHook = func(ctx context.Context) (*storage.Client, error) {
 	return storage.NewClient(ctx)
 }
@@ -240,12 +241,17 @@ func (s *FormSubmissionService) uploadFormFiles(req *SaveFormSubmissionRequest) 
 	var wg sync.WaitGroup
 
 	for _, j := range jobs {
+		select {
+		case sem <- struct{}{}:
+		case <-requestscope.Context(s.DB).Done():
+			wg.Wait()
+			return nil, nil, requestscope.Context(s.DB).Err()
+		}
 		wg.Add(1)
 
 		go func(j job) {
 			defer wg.Done()
 
-			sem <- struct{}{}
 			defer func() { <-sem }()
 
 			out := j.item
@@ -279,7 +285,7 @@ func (s *FormSubmissionService) uploadFormFiles(req *SaveFormSubmissionRequest) 
 				ext,
 			)
 
-			url, sizeBytes, err := uploadBase64ToGCSHook(
+			url, sizeBytes, err := uploadBase64ToGCSHook(requestscope.Context(s.DB),
 				out.DataBase64,
 				bucket,
 				objectName,
@@ -756,7 +762,7 @@ func (s *FormSubmissionService) GetUploadBytes(id uint) ([]byte, string, string,
 		return nil, "", "", err
 	}
 
-	ctx := context.Background()
+	ctx := requestscope.Context(s.DB)
 	rc, contentType, objectPath, err := openFormUploadReaderHook(ctx, rec)
 	if err != nil {
 		return nil, "", "", err

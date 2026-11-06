@@ -6,15 +6,13 @@ import (
 	"errors"
 	"io"
 	"log"
-	"os"
 	"time"
 
-	"nordik-drive-api/config"
-
 	"google.golang.org/genai"
-	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+
+	"nordik-drive-api/config"
 )
 
 type runtimeDependencies struct {
@@ -41,37 +39,22 @@ func initializeRuntime(ctx context.Context, cfg config.Config,
 	if err != nil {
 		return nil, errors.New("database connection pool initialization failed")
 	}
-	pool.SetMaxOpenConns(25)
-	pool.SetMaxIdleConns(10)
+	maxOpen := cfg.DBMaxOpen
+	if maxOpen <= 0 {
+		maxOpen = 25
+	}
+	pool.SetMaxOpenConns(maxOpen)
+	pool.SetMaxIdleConns(min(10, maxOpen))
 	pool.SetConnMaxIdleTime(5 * time.Minute)
 	pool.SetConnMaxLifetime(30 * time.Minute)
 	client, err := newVertex(ctx, &genai.ClientConfig{
-		Backend: genai.BackendVertexAI, Project: "planar-ray-472112-e8", Location: "global",
+		Backend: genai.BackendVertexAI, Project: cfg.VertexProject, Location: cfg.VertexLocation,
 	})
 	if err != nil || client == nil {
 		_ = pool.Close()
 		return nil, errors.New("Vertex AI client initialization failed; check Application Default Credentials, project, and location")
 	}
 	return &runtimeDependencies{DB: db, Pool: pool, Vertex: client}, nil
-}
-
-func openDatabase(cfg config.Config) (*gorm.DB, error) {
-	dsn := "host=" + cfg.DBHost + " user=" + cfg.DBUser + " password=" + cfg.DBPassword +
-		" dbname=" + cfg.DBName + " port=" + cfg.DBPort + " sslmode=disable"
-	// GORM's default initialization logger can print the driver's raw error.
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
-		PrepareStmt: true, Logger: logger.Default.LogMode(logger.Silent),
-	})
-	if err != nil {
-		if db != nil {
-			if pool, poolErr := db.DB(); poolErr == nil {
-				_ = pool.Close()
-			}
-		}
-		return nil, err
-	}
-	db.Logger = databaseLogger(os.Stderr)
-	return db, nil
 }
 
 func databaseLogger(output io.Writer) logger.Interface {

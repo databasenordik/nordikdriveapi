@@ -14,7 +14,10 @@ import (
 )
 
 func UploadPhotoToGCS(base64Data, bucketName, objectName string) (string, int64, error) {
-	ctx := context.Background()
+	return UploadPhotoToGCSContext(context.Background(), base64Data, bucketName, objectName)
+}
+
+func UploadPhotoToGCSContext(ctx context.Context, base64Data, bucketName, objectName string) (string, int64, error) {
 	client, err := storage.NewClient(ctx)
 	if err != nil {
 		return "", 0, err
@@ -36,6 +39,7 @@ func UploadPhotoToGCS(base64Data, bucketName, objectName string) (string, int64,
 
 	sizeBytes, err := w.Write(data)
 	if err != nil {
+		_ = w.CloseWithError(err)
 		return "", 0, err
 	}
 
@@ -136,7 +140,10 @@ func ExtractObjectPathFromGCSURL(bucket, raw string) (string, error) {
 // Move all objects under srcPrefix/ -> dstPrefix/ (copy+delete)
 // Returns mapping oldObjectPath -> newObjectPath (both include full object path inside bucket)
 func MoveGCSFolder(bucketName, srcPrefix, dstPrefix string) (map[string]string, error) {
-	ctx := context.Background()
+	return MoveGCSFolderContext(context.Background(), bucketName, srcPrefix, dstPrefix)
+}
+
+func MoveGCSFolderContext(ctx context.Context, bucketName, srcPrefix, dstPrefix string) (map[string]string, error) {
 	client, err := storage.NewClient(ctx)
 	if err != nil {
 		return nil, err

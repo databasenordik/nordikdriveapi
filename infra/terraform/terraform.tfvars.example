@@ -1,0 +1,61 @@
+# Release-input example; combine with nordikdrive.tfvars using docs/milestone-2-rollout.md.
+# Replace placeholders with reviewed values. No secret VALUES belong in this file.
+# The development profile blocks runtime plans until consumer limits are verified.
+project_id                   = "planar-ray-472112-e8"
+region                       = "us-west1"
+sql_instance_name            = "nordikdrive"
+sql_connection_name          = "planar-ray-472112-e8:us-west1:nordikdrive"
+database_name                = "postgres"
+# Budget values come from the development profile. Do not substitute observed
+# active connections for the maximum reservation of old API/NIA consumers.
+# trusted_proxy_hops is deliberately omitted until the ingress chain is verified.
+server_image                 = "us-west1-docker.pkg.dev/planar-ray-472112-e8/nordikdriveapi/nordik_drive_go@sha256:REPLACE_DIGEST"
+adapter_image                = "us-west1-docker.pkg.dev/planar-ray-472112-e8/nordikdriveapi/nordik_gateway_go@sha256:REPLACE_DIGEST"
+deployer_service_account     = "github-nordik-drive-deployer@planar-ray-472112-e8.iam.gserviceaccount.com"
+# Proposed metadata names only: these secrets have not been created.
+# Preserve the existing JWT payload when provisioning its first secret version.
+jwt_secret                   = { secret_id = "nordikdrive-m2-jwt", version = "1" }
+runtime_settings = {
+  legacy = {
+    GMAIL_USER = "REPLACE_SENDER"
+    BUCKET_NAME = "nordik-drive-photos"
+    APP_TIMEZONE = "America/Toronto"
+    ZOOM_ENABLED = "true"
+    ZOOM_ACCOUNT_ID = "REPLACE_CURRENT_ZOOM_ACCOUNT_ID"
+    ZOOM_CLIENT_ID = "REPLACE_CURRENT_ZOOM_CLIENT_ID"
+    CHAT_USE_NIA        = "true"
+    NIA_AUTH_MODE       = "iam"
+    NIA_GRPC_TLS        = "true"
+    NIA_TOKEN_AUDIENCE  = "https://nordik-nia-api-vz6v4w2s6q-uw.a.run.app"
+    NIA_GRPC_TARGET     = "nordik-nia-api-724838782318.us-west1.run.app:443"
+    # Verify audience/caller grants before using IAM; retain current Zoom settings.
+  }
+  worker = {
+    GMAIL_USER = "REPLACE_SENDER"
+    BUCKET_NAME = "nordik-drive-photos"
+    APP_TIMEZONE = "America/Toronto"
+    ZOOM_ENABLED = "true"
+    ZOOM_ACCOUNT_ID = "REPLACE_CURRENT_ZOOM_ACCOUNT_ID"
+    ZOOM_CLIENT_ID = "REPLACE_CURRENT_ZOOM_CLIENT_ID"
+  }
+}
+runtime_secrets = {
+  gateway = {}
+  legacy = {
+    GMAIL_APP_PASSWORD = { secret_id = "nordikdrive-m2-smtp", version = "1" }
+    ZOOM_CLIENT_SECRET = { secret_id = "nordikdrive-m2-zoom", version = "1" }
+  }
+  worker = {
+    GMAIL_APP_PASSWORD = { secret_id = "nordikdrive-m2-smtp", version = "1" }
+    ZOOM_CLIENT_SECRET = { secret_id = "nordikdrive-m2-zoom", version = "1" }
+  }
+}
+buckets_by_owner = {
+  legacy = ["nordik-drive-photos"]
+  worker = ["nordik-drive-photos"]
+}
+# Preview stays private and all schedules paused until manual validation.
+public_gateway   = false
+enable_schedules = false
+rate_limit_mode  = "observe"
+# service_backends = { records = { url = "https://records.run.app", audience = "https://records.run.app" } }

@@ -1,0 +1,30 @@
+# SYNTHETIC MOCK FIXTURE ONLY. These are test assumptions, not a live budget.
+# The real development profile intentionally reserves much more for the
+# confirmed NIA consumer and blocks preview/cutover pending verified limits.
+project_id          = "planar-ray-472112-e8"
+region              = "us-west1"
+sql_instance_name   = "nordikdrive"
+sql_connection_name = "planar-ray-472112-e8:us-west1:nordikdrive"
+database_name       = "postgres"
+sql_ip_type         = "public"
+
+database_connection_capacity            = 25
+database_superuser_reserved_connections = 3
+db_pool_limits                          = { gateway = 1, legacy = 3, worker = 2, cleanup = 1 }
+max_instances                           = { gateway = 1, legacy = 1, worker = 1 }
+rollout_extra_instances                 = { gateway = 1, legacy = 1, worker = 1 }
+worker_request_concurrency              = 1
+
+# Seven is the maximum remaining allowance, not a measured consumer maximum.
+# This candidate cannot coexist with even one old API instance capped at 25.
+other_reserved_connections    = 7
+connection_budget_reviewed = false
+
+public_gateway   = false
+enable_schedules = false
+rate_limit_mode  = "observe"
+
+# Supply actual images, numeric secret references, sender/Zoom/NIA settings,
+# verified proxy hops and required buckets in a separate reviewed release file.
+# Preserve CHAT_USE_NIA=true and the existing JWT value. The existing public
+# service nordikdriveapi is not selected or imported by this candidate.

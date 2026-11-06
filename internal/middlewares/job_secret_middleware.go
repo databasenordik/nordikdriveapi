@@ -3,16 +3,22 @@ package middlewares
 import (
 	"crypto/subtle"
 	"net/http"
-	"nordik-drive-api/config"
+	"os"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+
+	"nordik-drive-api/config"
 )
 
 const HonourJobSecretHeader = "X-Honour-Job-Secret"
 
 func JobSecretMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if os.Getenv("SCHEDULER_MODE") == "external" || os.Getenv("SCHEDULER_MODE") == "disabled" {
+			c.AbortWithStatusJSON(404, gin.H{"error": "not found"})
+			return
+		}
 		cfg := config.LoadConfig()
 		expected := strings.TrimSpace(cfg.HonourJobSecret)
 		if expected == "" {

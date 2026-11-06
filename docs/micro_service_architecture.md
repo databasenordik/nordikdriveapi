@@ -1,6 +1,6 @@
 # Microservice Architecture Proposal
 
-**Status:** Target architecture remains a draft for review. Step 1 baseline work is recorded in [the baseline guide](baseline.md); service extraction and infrastructure changes have not started.
+**Status:** Step 1 baseline work is recorded in [the baseline guide](baseline.md). The [Milestone 2 implementation and manual provisioning package](milestone-2.md) adds gateway and runtime foundations. Cloud provisioning, production cutover and domain-service extraction remain pending.
 
 ## Goal and Scope
 

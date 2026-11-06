@@ -9,13 +9,15 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/mail"
-	"nordik-drive-api/internal/mailer"
-	"nordik-drive-api/internal/util"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"gorm.io/gorm"
+
+	"nordik-drive-api/internal/mailer"
+	"nordik-drive-api/internal/requestscope"
+	"nordik-drive-api/internal/util"
 )
 
 type SupportRequestMailer interface {
@@ -46,9 +48,9 @@ const (
 	maxSupportRequestPageSize     = 100
 )
 
-var uploadSupportRequestScreenshotHook = util.UploadPhotoToGCS
+var uploadSupportRequestScreenshotHook = util.UploadPhotoToGCSContext
 var supportRequestGoHook = func(fn func()) {
-	go fn()
+	fn()
 }
 
 var triggerSupportRequestNotificationHook = func(
@@ -273,7 +275,7 @@ func (s *SupportRequestService) prepareScreenshotUpload(
 
 	displayFilename, objectPath := buildScreenshotFileNames(fileHeader.Filename, contentType, userID, now)
 	base64Body := base64.StdEncoding.EncodeToString(data)
-	fileURL, sizeBytes, err := uploadSupportRequestScreenshotHook(
+	fileURL, sizeBytes, err := uploadSupportRequestScreenshotHook(requestscope.Context(s.DB),
 		fmt.Sprintf("data:%s;base64,%s", contentType, base64Body),
 		"nordik-drive-photos",
 		objectPath,

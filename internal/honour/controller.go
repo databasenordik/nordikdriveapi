@@ -19,6 +19,7 @@ type Controller struct {
 }
 
 func (hc *Controller) GetToday(c *gin.Context) {
+	hc = hc.withContext(c.Request.Context())
 	filename := strings.TrimSpace(c.Query("filename"))
 	if filename == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "filename is required"})
@@ -39,6 +40,7 @@ func (hc *Controller) GetToday(c *gin.Context) {
 }
 
 func (hc *Controller) RunDaily(c *gin.Context) {
+	hc = hc.withContext(c.Request.Context())
 	if hc.Service == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "honour service not configured"})
 		return

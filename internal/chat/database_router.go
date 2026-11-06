@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	f "nordik-drive-api/internal/file"
-
 	"gorm.io/gorm"
+
+	f "nordik-drive-api/internal/file"
 )
 
 type databaseChatOperation string
@@ -151,10 +151,10 @@ func (cs *ChatService) getFastChatAnswer(input ChatQueryInput) (*ChatResult, boo
 	if cs == nil {
 		return nil, false
 	}
-	cs.fastAnswerCacheMu.RLock()
-	result := cs.fastAnswerCache[fastChatAnswerCacheKey(input)]
+	cs.sharedState().fastAnswerCacheMu.RLock()
+	result := cs.sharedState().fastAnswerCache[fastChatAnswerCacheKey(input)]
 	cloned := cloneChatResult(result)
-	cs.fastAnswerCacheMu.RUnlock()
+	cs.sharedState().fastAnswerCacheMu.RUnlock()
 	if cloned == nil {
 		return nil, false
 	}
@@ -181,20 +181,20 @@ func (cs *ChatService) storeFastChatAnswer(input ChatQueryInput, result *ChatRes
 		return
 	}
 	key := fastChatAnswerCacheKey(input)
-	cs.fastAnswerCacheMu.Lock()
-	defer cs.fastAnswerCacheMu.Unlock()
-	if cs.fastAnswerCache == nil {
-		cs.fastAnswerCache = make(map[string]*ChatResult, maxFastChatAnswers)
+	cs.sharedState().fastAnswerCacheMu.Lock()
+	defer cs.sharedState().fastAnswerCacheMu.Unlock()
+	if cs.sharedState().fastAnswerCache == nil {
+		cs.sharedState().fastAnswerCache = make(map[string]*ChatResult, maxFastChatAnswers)
 	}
-	if _, exists := cs.fastAnswerCache[key]; !exists {
-		if len(cs.fastAnswerCacheOrder) >= maxFastChatAnswers {
-			oldest := cs.fastAnswerCacheOrder[0]
-			delete(cs.fastAnswerCache, oldest)
-			cs.fastAnswerCacheOrder = cs.fastAnswerCacheOrder[1:]
+	if _, exists := cs.sharedState().fastAnswerCache[key]; !exists {
+		if len(cs.sharedState().fastAnswerCacheOrder) >= maxFastChatAnswers {
+			oldest := cs.sharedState().fastAnswerCacheOrder[0]
+			delete(cs.sharedState().fastAnswerCache, oldest)
+			cs.sharedState().fastAnswerCacheOrder = cs.sharedState().fastAnswerCacheOrder[1:]
 		}
-		cs.fastAnswerCacheOrder = append(cs.fastAnswerCacheOrder, key)
+		cs.sharedState().fastAnswerCacheOrder = append(cs.sharedState().fastAnswerCacheOrder, key)
 	}
-	cs.fastAnswerCache[key] = cloneChatResult(result)
+	cs.sharedState().fastAnswerCache[key] = cloneChatResult(result)
 }
 
 func fastChatAnswerCacheKey(input ChatQueryInput) string {
@@ -649,7 +649,7 @@ func (cs *ChatService) loadDatabaseDimensionValues(input ChatQueryInput, field s
 
 func (cs *ChatService) queryDatabaseDimensionCounts(input ChatQueryInput, field string, filters deterministicRowFilter) ([]databaseDimensionValue, error) {
 	cacheKey := databaseQueryCacheKey("dimension", input, filters) + "\x1f" + field
-	if cached, ok := cs.databaseQueryCache.load(cacheKey); ok {
+	if cached, ok := cs.sharedState().databaseQueryCache.load(cacheKey); ok {
 		if values, ok := cached.([]databaseDimensionValue); ok {
 			return append([]databaseDimensionValue(nil), values...), nil
 		}
@@ -672,7 +672,7 @@ func (cs *ChatService) queryDatabaseDimensionCounts(input ChatQueryInput, field 
 		values[index].Normalized = normalizeChatSearchValue(values[index].Normalized)
 		values[index].Display = structuredFieldDisplay(values[index].Display, values[index].Normalized)
 	}
-	cs.databaseQueryCache.store(cacheKey, append([]databaseDimensionValue(nil), values...))
+	cs.sharedState().databaseQueryCache.store(cacheKey, append([]databaseDimensionValue(nil), values...))
 	return values, nil
 }
 
@@ -713,7 +713,7 @@ func databaseRowFiltersEmpty(filters deterministicRowFilter) bool {
 
 func (cs *ChatService) countDatabaseRows(input ChatQueryInput, filters deterministicRowFilter) (int, error) {
 	cacheKey := databaseQueryCacheKey("count", input, filters)
-	if cached, ok := cs.databaseQueryCache.load(cacheKey); ok {
+	if cached, ok := cs.sharedState().databaseQueryCache.load(cacheKey); ok {
 		if count, ok := cached.(int); ok {
 			return count, nil
 		}
@@ -723,13 +723,13 @@ func (cs *ChatService) countDatabaseRows(input ChatQueryInput, filters determini
 		return 0, err
 	}
 	result := int(count)
-	cs.databaseQueryCache.store(cacheKey, result)
+	cs.sharedState().databaseQueryCache.store(cacheKey, result)
 	return result, nil
 }
 
 func (cs *ChatService) queryDatabaseNamedRecords(input ChatQueryInput, filters deterministicRowFilter) ([]databaseNamedRecord, error) {
 	cacheKey := databaseQueryCacheKey("records", input, filters)
-	if cached, ok := cs.databaseQueryCache.load(cacheKey); ok {
+	if cached, ok := cs.sharedState().databaseQueryCache.load(cacheKey); ok {
 		if records, ok := cached.([]databaseNamedRecord); ok {
 			return append([]databaseNamedRecord(nil), records...), nil
 		}
@@ -743,7 +743,7 @@ func (cs *ChatService) queryDatabaseNamedRecords(input ChatQueryInput, filters d
 	if err := query.Scan(&records).Error; err != nil {
 		return nil, err
 	}
-	cs.databaseQueryCache.store(cacheKey, append([]databaseNamedRecord(nil), records...))
+	cs.sharedState().databaseQueryCache.store(cacheKey, append([]databaseNamedRecord(nil), records...))
 	return records, nil
 }
 
@@ -753,7 +753,7 @@ func (cs *ChatService) queryConfiguredDatabaseDistinctValues(input ChatQueryInpu
 	}
 
 	cacheKey := databaseQueryCacheKey("distinct", input, filters) + "\x1f" + strings.Join(field.SourceNames, "\x1e")
-	if cached, ok := cs.databaseQueryCache.load(cacheKey); ok {
+	if cached, ok := cs.sharedState().databaseQueryCache.load(cacheKey); ok {
 		if result, ok := cached.(databaseDistinctValuesResult); ok {
 			return append([]string(nil), result.Values...), result.RowsSelected, nil
 		}
@@ -802,7 +802,7 @@ func (cs *ChatService) queryConfiguredDatabaseDistinctValues(input ChatQueryInpu
 	sort.Slice(values, func(i, j int) bool {
 		return strings.ToLower(values[i]) < strings.ToLower(values[j])
 	})
-	cs.databaseQueryCache.store(cacheKey, databaseDistinctValuesResult{
+	cs.sharedState().databaseQueryCache.store(cacheKey, databaseDistinctValuesResult{
 		Values:       append([]string(nil), values...),
 		RowsSelected: rowsSelected,
 	})

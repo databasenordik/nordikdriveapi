@@ -13,6 +13,7 @@ type LookupController struct {
 }
 
 func (lc *LookupController) GetAllProvinces(c *gin.Context) {
+	lc = lc.withContext(c.Request.Context())
 	provinces, err := lc.Service.GetAllProvinces()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -23,6 +24,7 @@ func (lc *LookupController) GetAllProvinces(c *gin.Context) {
 }
 
 func (lc *LookupController) GetDaySchoolsByProvince(c *gin.Context) {
+	lc = lc.withContext(c.Request.Context())
 	provinceIDStr := strings.TrimSpace(c.Param("province"))
 	provinceID, err := strconv.Atoi(provinceIDStr)
 	if err != nil || provinceID <= 0 {
@@ -40,6 +42,7 @@ func (lc *LookupController) GetDaySchoolsByProvince(c *gin.Context) {
 }
 
 func (lc *LookupController) GetIndianHospitalsByProvince(c *gin.Context) {
+	lc = lc.withContext(c.Request.Context())
 	provinceIDStr := strings.TrimSpace(c.Param("province"))
 	provinceID, err := strconv.Atoi(provinceIDStr)
 	if err != nil || provinceID <= 0 {

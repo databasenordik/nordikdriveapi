@@ -3,9 +3,10 @@ package role
 import (
 	"fmt"
 	"net/http"
-	"nordik-drive-api/internal/auth"
 
 	"github.com/gin-gonic/gin"
+
+	"nordik-drive-api/internal/auth"
 )
 
 type RoleServiceAPI interface {
@@ -19,6 +20,7 @@ type RoleController struct {
 }
 
 func (rc *RoleController) GetAllRoles(c *gin.Context) {
+	rc = rc.withContext(c.Request.Context())
 	userIDVal, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "user ID not found"})
@@ -63,6 +65,7 @@ func (rc *RoleController) GetAllRoles(c *gin.Context) {
 }
 
 func (rc *RoleController) GetRolesByUserId(c *gin.Context) {
+	rc = rc.withContext(c.Request.Context())
 	userIDVal, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "user ID not found"})

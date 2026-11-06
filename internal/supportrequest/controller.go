@@ -14,6 +14,7 @@ type SupportRequestController struct {
 }
 
 func (sc *SupportRequestController) Create(c *gin.Context) {
+	sc = sc.withContext(c.Request.Context())
 	if _, exists := c.Get("userID"); !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "user ID not found"})
 		return
@@ -57,6 +58,7 @@ func (sc *SupportRequestController) Create(c *gin.Context) {
 }
 
 func (sc *SupportRequestController) ListMine(c *gin.Context) {
+	sc = sc.withContext(c.Request.Context())
 	userID, ok := supportRequestContextUserID(c)
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user ID"})
@@ -79,6 +81,7 @@ func (sc *SupportRequestController) ListMine(c *gin.Context) {
 }
 
 func (sc *SupportRequestController) ListForAdmin(c *gin.Context) {
+	sc = sc.withContext(c.Request.Context())
 	userID, ok := supportRequestContextUserID(c)
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user ID"})
@@ -105,6 +108,7 @@ func (sc *SupportRequestController) ListForAdmin(c *gin.Context) {
 }
 
 func (sc *SupportRequestController) Update(c *gin.Context) {
+	sc = sc.withContext(c.Request.Context())
 	userID, ok := supportRequestContextUserID(c)
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user ID"})

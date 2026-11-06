@@ -10,6 +10,8 @@ import (
 
 	"cloud.google.com/go/storage"
 	"gorm.io/gorm"
+
+	"nordik-drive-api/internal/requestscope"
 )
 
 var newGCSClientHook = func(ctx context.Context) (*storage.Client, error) {
@@ -46,7 +48,7 @@ func (s *LogoContentService) readHTMLFromGCS(gsURL string) ([]byte, string, stri
 		return nil, "", "", fmt.Errorf("logo url must point to an html file")
 	}
 
-	ctx := context.Background()
+	ctx := requestscope.Context(s.DB)
 	client, err := newGCSClientHook(ctx)
 	if err != nil {
 		return nil, "", "", err

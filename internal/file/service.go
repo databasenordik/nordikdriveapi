@@ -11,10 +11,6 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
-	"nordik-drive-api/internal/auth"
-	"nordik-drive-api/internal/honour"
-	"nordik-drive-api/internal/mailer"
-	"nordik-drive-api/internal/util"
 	"os"
 	"path"
 	"path/filepath"
@@ -27,6 +23,12 @@ import (
 	"github.com/xuri/excelize/v2"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
+
+	"nordik-drive-api/internal/auth"
+	"nordik-drive-api/internal/honour"
+	"nordik-drive-api/internal/mailer"
+	"nordik-drive-api/internal/requestscope"
+	"nordik-drive-api/internal/util"
 )
 
 type FileService struct {
@@ -58,8 +60,8 @@ const (
 )
 
 var (
-	uploadToGCSHook   = util.UploadPhotoToGCS
-	moveGCSFolderHook = util.MoveGCSFolder
+	uploadToGCSHook   = util.UploadPhotoToGCSContext
+	moveGCSFolderHook = util.MoveGCSFolderContext
 
 	newGCSClientHook = func(ctx context.Context) (*storage.Client, error) {
 		return storage.NewClient(ctx)
@@ -1162,7 +1164,7 @@ func (fs *FileService) CreateEditRequest(input EditRequestInput, userID uint) (*
 
 		objectPath := fmt.Sprintf("%s/%s", basePrefix, fileName)
 
-		url, sizeBytes, err := uploadToGCSHook(p.DataBase64, bucket, objectPath)
+		url, sizeBytes, err := uploadToGCSHook(requestscope.Context(fs.DB), p.DataBase64, bucket, objectPath)
 		if err != nil {
 			return nil, err
 		}
@@ -1202,7 +1204,7 @@ func (fs *FileService) CreateEditRequest(input EditRequestInput, userID uint) (*
 
 		objectPath := fmt.Sprintf("%s/%s", basePrefix, fileName)
 
-		url, sizeBytes, err := uploadToGCSHook(p.DataBase64, bucket, objectPath)
+		url, sizeBytes, err := uploadToGCSHook(requestscope.Context(fs.DB), p.DataBase64, bucket, objectPath)
 		if err != nil {
 			return nil, err
 		}
@@ -1256,7 +1258,7 @@ func (fs *FileService) CreateEditRequest(input EditRequestInput, userID uint) (*
 
 		// ✅ You can reuse UploadPhotoToGCS if it supports any base64 mime.
 		// Better rename it to UploadBase64ToGCS.
-		url, sizeBytes, err := uploadToGCSHook(doc.DataBase64, bucket, objectPath)
+		url, sizeBytes, err := uploadToGCSHook(requestscope.Context(fs.DB), doc.DataBase64, bucket, objectPath)
 		if err != nil {
 			return nil, err
 		}
@@ -1390,7 +1392,7 @@ func (fs *FileService) CreateAchieverStoryRequest(input AchieverStoryRequestInpu
 				time.Now().UTC().Format("20060102150405"),
 				fileName,
 			)
-			storyURL, sizeBytes, err := uploadToGCSHook(storedFile.DataBase64, "nordik-drive-photos", objectPath)
+			storyURL, sizeBytes, err := uploadToGCSHook(requestscope.Context(fs.DB), storedFile.DataBase64, "nordik-drive-photos", objectPath)
 			if err != nil {
 				return fmt.Errorf("upload story file: %w", err)
 			}
@@ -1865,7 +1867,7 @@ func (fs *FileService) ReviewEditRequest(
 				srcPrefix := util.TempPrefix(req.RequestID, req.FirstName, req.LastName)
 				dstPrefix := util.RowPrefix(int(finalRowID))
 
-				mapping, err := moveGCSFolderHook(bucket, srcPrefix, dstPrefix)
+				mapping, err := moveGCSFolderHook(requestscope.Context(fs.DB), bucket, srcPrefix, dstPrefix)
 				if err != nil {
 					return err
 				}
@@ -2142,7 +2144,7 @@ func (fs *FileService) GetPhotoBytes(photoID uint) ([]byte, string, error) {
 	prefix := "gs://" + bucketName + "/"
 	objectPath := strings.TrimPrefix(photo.PhotoURL, prefix)
 
-	ctx := context.Background()
+	ctx := requestscope.Context(fs.DB)
 	client, err := newGCSClientHook(ctx)
 	if err != nil {
 		return nil, "", err
@@ -2224,7 +2226,7 @@ func (fs *FileService) GetDocBytes(docID uint) ([]byte, string, string, error) {
 	prefix := "gs://" + bucketName + "/"
 	objectPath := strings.TrimPrefix(doc.PhotoURL, prefix)
 
-	ctx := context.Background()
+	ctx := requestscope.Context(fs.DB)
 	client, err := newGCSClientHook(ctx)
 	if err != nil {
 		return nil, "", "", err
@@ -2425,7 +2427,7 @@ func (fs *FileService) readFromGCS(gsURL string, dbFilename string) ([]byte, str
 		return nil, "", "", fmt.Errorf("bucket name not found (gs url + BUCKET_NAME empty)")
 	}
 
-	ctx := context.Background()
+	ctx := requestscope.Context(fs.DB)
 	client, err := newGCSClientHook(ctx)
 	if err != nil {
 		return nil, "", "", err

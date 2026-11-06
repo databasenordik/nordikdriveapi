@@ -1,7 +1,6 @@
 package chat
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"mime/multipart"
@@ -12,6 +11,7 @@ import (
 	"unicode"
 
 	f "nordik-drive-api/internal/file"
+	"nordik-drive-api/internal/requestscope"
 )
 
 type chatDatasetCacheEntry struct {
@@ -137,7 +137,7 @@ func (cs *ChatService) Chat(question string, audioFile *multipart.FileHeader, fi
 		return nil, err
 	}
 
-	ctx := context.Background()
+	ctx := requestscope.Context(cs.DB)
 
 	var audioBytes []byte
 	var audioMime string
@@ -232,7 +232,7 @@ func (cs *ChatService) getPreparedChatDataset(fileID uint, version int, communit
 
 func (cs *ChatService) getOrLoadChatDataset(fileID uint, version int) (*chatDatasetCacheEntry, error) {
 	cacheKey := chatDatasetCacheKey(fileID, version)
-	if cached, ok := cs.datasetCache.load(cacheKey); ok {
+	if cached, ok := cs.sharedState().datasetCache.load(cacheKey); ok {
 		if entry, ok := cached.(*chatDatasetCacheEntry); ok {
 			return entry, nil
 		}
@@ -252,7 +252,7 @@ func (cs *ChatService) getOrLoadChatDataset(fileID uint, version int) (*chatData
 	}
 
 	entry := &chatDatasetCacheEntry{rows: rows}
-	actual := cs.datasetCache.loadOrStore(cacheKey, entry)
+	actual := cs.sharedState().datasetCache.loadOrStore(cacheKey, entry)
 	if cached, ok := actual.(*chatDatasetCacheEntry); ok {
 		return cached, nil
 	}

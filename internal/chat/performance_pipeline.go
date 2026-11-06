@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	f "nordik-drive-api/internal/file"
+	"nordik-drive-api/internal/requestscope"
 )
 
 type fastTextChatOutcome struct {
@@ -21,7 +22,7 @@ type fullTextGenerationOutcome struct {
 // cache. This removes burst duplication while guaranteeing that a completed
 // lookup never hides a newly uploaded file version.
 func (cs *ChatService) lookupChatFile(filename string) (f.File, error) {
-	value, err, _ := cs.fileLookupGroup.Do(filename, func() (any, error) {
+	value, err := coalesced(requestscope.Context(cs.DB), &cs.sharedState().fileLookupGroup, filename, func() (any, error) {
 		var file f.File
 		fileQuery := cs.DB.Select("id, version, description").Where("filename = ?", filename).Order("version DESC")
 		if queryErr := fileQuery.First(&file).Error; queryErr != nil {
@@ -53,12 +54,12 @@ func (cs *ChatService) tryCoalescedFastTextChat(input ChatQueryInput) (*ChatResu
 		return cached, true, nil
 	}
 
-	value, err, _ := cs.fastRouteGroup.Do(fastChatAnswerCacheKey(input), func() (any, error) {
+	value, err := coalesced(requestscope.Context(cs.DB), &cs.sharedState().fastRouteGroup, fastChatAnswerCacheKey(input), func() (any, error) {
 		if cached, ok := cs.getFastChatAnswer(input); ok {
 			return fastTextChatOutcome{Result: cached, Routed: true}, nil
 		}
 		if routed, ok := cs.tryDatabaseChat(input); ok {
-			routed = cs.finalizeRoutedChatAnswer(context.Background(), input, routed)
+			routed = cs.finalizeRoutedChatAnswer(requestscope.Context(cs.DB), input, routed)
 			cs.storeFastChatAnswer(input, routed)
 			return fastTextChatOutcome{Result: routed, Routed: true}, nil
 		}
@@ -70,7 +71,7 @@ func (cs *ChatService) tryCoalescedFastTextChat(input ChatQueryInput) (*ChatResu
 		if !ok {
 			return fastTextChatOutcome{}, nil
 		}
-		routed = cs.finalizeRoutedChatAnswer(context.Background(), input, routed)
+		routed = cs.finalizeRoutedChatAnswer(requestscope.Context(cs.DB), input, routed)
 		cs.storeFastChatAnswer(input, routed)
 		return fastTextChatOutcome{Result: routed, Routed: true}, nil
 	})
@@ -94,7 +95,7 @@ func (cs *ChatService) generateCoalescedFullTextAnswer(
 	primaryModel string,
 	fallbackModel string,
 ) (string, string, error) {
-	value, err, _ := cs.fullGenerationGroup.Do("full:"+fastChatAnswerCacheKey(input), func() (any, error) {
+	value, err := coalesced(ctx, &cs.sharedState().fullGenerationGroup, "full:"+fastChatAnswerCacheKey(input), func() (any, error) {
 		answer, usedModel, generationErr := cs.generateFromPromptWithModels(ctx, prompt, nil, "", primaryModel, fallbackModel)
 		if generationErr != nil {
 			return nil, generationErr

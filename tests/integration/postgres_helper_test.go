@@ -3,15 +3,20 @@
 package integration
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"net/url"
 	"os"
+	"strings"
 	"testing"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+
+	"nordik-drive-api/config"
+	"nordik-drive-api/internal/database"
 )
 
 // Each test owns a random schema in a strictly named local fixture database.
@@ -63,7 +68,8 @@ func newPostgresFixture(t testing.TB) *gorm.DB {
 	})
 	query.Set("search_path", schema)
 	connection.RawQuery = query.Encode()
-	db, err := gorm.Open(postgres.Open(connection.String()), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	password, _ := connection.User.Password()
+	db, cleanup, err := database.Open(context.Background(), config.Config{DBAuthMode: "password", DBHost: connection.Hostname(), DBPort: connection.Port(), DBUser: connection.User.Username(), DBPassword: password, DBName: strings.TrimPrefix(connection.Path, "/"), DBSchema: schema, DBMaxOpen: 4})
 	if err != nil {
 		t.Fatal("could not open isolated fixture")
 	}
@@ -73,6 +79,6 @@ func newPostgresFixture(t testing.TB) *gorm.DB {
 	}
 	pool.SetMaxOpenConns(4)
 	pool.SetMaxIdleConns(2)
-	t.Cleanup(func() { _ = pool.Close() })
+	t.Cleanup(cleanup)
 	return db
 }

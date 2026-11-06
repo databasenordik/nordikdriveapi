@@ -2,14 +2,19 @@ package mailer
 
 import (
 	"bytes"
+	"context"
+	"crypto/tls"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
 	"mime/quotedprintable"
+	"net"
 	"net/smtp"
 	"net/textproto"
 	"strings"
+	"time"
 )
 
 type Service struct {
@@ -17,6 +22,8 @@ type Service struct {
 	Password string
 	SMTPHost string
 	SMTPPort string
+	ctx      context.Context
+	slots    chan struct{}
 
 	// keep this overridable for tests
 	sendMail func(addr string, a smtp.Auth, from string, to []string, msg []byte) error
@@ -28,7 +35,7 @@ func NewService(from, password, smtpHost, smtpPort string) *Service {
 		Password: password,
 		SMTPHost: smtpHost,
 		SMTPPort: smtpPort,
-		sendMail: smtp.SendMail,
+		slots:    make(chan struct{}, 4),
 	}
 }
 
@@ -59,7 +66,7 @@ func (s *Service) Send(to []string, subject, body string) error {
 		body,
 	))
 
-	return s.sendMail(
+	return s.deliver(
 		s.SMTPHost+":"+s.SMTPPort,
 		auth,
 		s.From,
@@ -154,13 +161,81 @@ func (s *Service) SendWithAttachments(to []string, subject, body string, attachm
 
 	auth := smtp.PlainAuth("", s.From, s.Password, s.SMTPHost)
 
-	return s.sendMail(
+	return s.deliver(
 		s.SMTPHost+":"+s.SMTPPort,
 		auth,
 		s.From,
 		to,
 		message.Bytes(),
 	)
+}
+
+func (s *Service) WithContext(ctx context.Context) any { copy := *s; copy.ctx = ctx; return &copy }
+
+// deliver keeps SMTP work within the request/job lifetime. Cancellation closes
+// the socket, including while net/smtp is waiting for a server response.
+func (s *Service) deliver(addr string, auth smtp.Auth, from string, to []string, message []byte) error {
+	if s.sendMail != nil {
+		return s.sendMail(addr, auth, from, to, message)
+	}
+	ctx := s.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	if s.slots != nil {
+		select {
+		case s.slots <- struct{}{}:
+			defer func() { <-s.slots }()
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	conn, err := (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return errors.New("SMTP connection failed")
+	}
+	defer conn.Close()
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = conn.SetDeadline(deadline)
+	}
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
+	client, err := smtp.NewClient(conn, s.SMTPHost)
+	if err != nil {
+		return errors.New("SMTP handshake failed")
+	}
+	defer client.Close()
+	if ok, _ := client.Extension("STARTTLS"); !ok {
+		return errors.New("SMTP server must support STARTTLS")
+	}
+	if err := client.StartTLS(&tls.Config{ServerName: s.SMTPHost, MinVersion: tls.VersionTLS12}); err != nil {
+		return errors.New("SMTP TLS failed")
+	}
+	if err := client.Auth(auth); err != nil {
+		return errors.New("SMTP authentication failed")
+	}
+	if err := client.Mail(from); err != nil {
+		return errors.New("SMTP sender rejected")
+	}
+	for _, recipient := range to {
+		if err := client.Rcpt(recipient); err != nil {
+			return errors.New("SMTP recipient rejected")
+		}
+	}
+	writer, err := client.Data()
+	if err != nil {
+		return errors.New("SMTP data rejected")
+	}
+	if _, err := writer.Write(message); err != nil {
+		return errors.New("SMTP write failed")
+	}
+	if err := writer.Close(); err != nil {
+		return errors.New("SMTP delivery outcome uncertain")
+	}
+	_ = client.Quit()
+	return nil
 }
 
 type base64LineWriter struct {

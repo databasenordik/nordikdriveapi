@@ -16,6 +16,7 @@ type AdminController struct {
 }
 
 func (ac *AdminController) SearchFileEditRequests(c *gin.Context) {
+	ac = ac.withContext(c.Request.Context())
 	var req AdminFileEditSearchRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -40,6 +41,7 @@ func (ac *AdminController) SearchFileEditRequests(c *gin.Context) {
 
 // POST /api/admin/details  { "request_id": 123 }
 func (ac *AdminController) GetFileEditRequestDetails(c *gin.Context) {
+	ac = ac.withContext(c.Request.Context())
 	var req AdminDetailsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -66,6 +68,7 @@ func (ac *AdminController) GetFileEditRequestDetails(c *gin.Context) {
 
 // GET /api/admin/details/:request_id
 func (ac *AdminController) GetFileEditRequestDetailsByParam(c *gin.Context) {
+	ac = ac.withContext(c.Request.Context())
 	idStr := c.Param("request_id")
 	id, err := strconv.Atoi(idStr)
 	if err != nil || id <= 0 {
@@ -88,6 +91,7 @@ func (ac *AdminController) GetFileEditRequestDetailsByParam(c *gin.Context) {
 }
 
 func (ac *AdminController) DownloadUpdates(c *gin.Context) {
+	ac = ac.withContext(c.Request.Context())
 	var req AdminDownloadRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -111,6 +115,7 @@ func (ac *AdminController) DownloadUpdates(c *gin.Context) {
 
 // POST /api/admin/download-media
 func (ac *AdminController) DownloadMediaZip(c *gin.Context) {
+	ac = ac.withContext(c.Request.Context())
 	var req AdminDownloadMediaRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

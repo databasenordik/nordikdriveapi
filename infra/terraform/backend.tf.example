@@ -1,0 +1,5 @@
+# Copy to backend.tf after the private state bucket is selected and approved.
+# Existing applied local state must be migrated, never silently discarded.
+terraform {
+  backend "gcs" {}
+}

@@ -1,5 +1,9 @@
 # Nordik Drive API
 
+Milestone 2 implementation and manual provisioning instructions are in
+[docs/milestone-2.md](docs/milestone-2.md). The gateway routes service groups;
+individual endpoints remain owned by the destination service.
+
 Go backend for the Nordik Drive data management platform.
 
 The API supports file management, document handling, forms, and the main features used by the web application. It also connects the application to NIA chat.

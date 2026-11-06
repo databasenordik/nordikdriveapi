@@ -1,0 +1,572 @@
+[
+  {
+    "method": "POST",
+    "path": "/api/user/login",
+    "auth": "public",
+    "group": "auth"
+  },
+  {
+    "method": "POST",
+    "path": "/api/user/signup",
+    "auth": "public",
+    "group": "auth"
+  },
+  {
+    "method": "GET",
+    "path": "/api/user/me",
+    "auth": "backend",
+    "group": "auth"
+  },
+  {
+    "method": "POST",
+    "path": "/api/user/logout",
+    "auth": "public",
+    "group": "auth"
+  },
+  {
+    "method": "POST",
+    "path": "/api/user/refresh",
+    "auth": "backend",
+    "group": "auth"
+  },
+  {
+    "method": "POST",
+    "path": "/api/user/verify-password",
+    "auth": "access",
+    "group": "auth"
+  },
+  {
+    "method": "GET",
+    "path": "/api/user",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "POST",
+    "path": "/api/user/send-otp",
+    "auth": "public",
+    "group": "auth"
+  },
+  {
+    "method": "POST",
+    "path": "/api/user/reset-password",
+    "auth": "public",
+    "group": "auth"
+  },
+  {
+    "method": "GET",
+    "path": "/api/communities",
+    "auth": "public",
+    "group": "business"
+  },
+  {
+    "method": "POST",
+    "path": "/api/communities",
+    "auth": "public",
+    "group": "business"
+  },
+  {
+    "method": "GET",
+    "path": "/api/role",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "GET",
+    "path": "/api/role/user",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "GET",
+    "path": "/api/file",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "POST",
+    "path": "/api/file/upload",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "GET",
+    "path": "/api/file/data",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "GET",
+    "path": "/api/file/data/normalized",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "POST",
+    "path": "/api/file/data/normalized/sync",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/file",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/file/reset",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "GET",
+    "path": "/api/file/access",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "POST",
+    "path": "/api/file/access",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/file/access",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "GET",
+    "path": "/api/file/history",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "POST",
+    "path": "/api/file/replace",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "POST",
+    "path": "/api/file/revert",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "POST",
+    "path": "/api/file/edit/request",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "POST",
+    "path": "/api/file/achiever-stories/request",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "GET",
+    "path": "/api/file/edit/request",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "GET",
+    "path": "/api/file/edit/photos/:requestId",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "GET",
+    "path": "/api/file/edit/docs/:requestId",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "GET",
+    "path": "/api/file/photos/:rowId",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "GET",
+    "path": "/api/file/docs/:rowId",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "GET",
+    "path": "/api/file/achiever-stories/:rowId",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "GET",
+    "path": "/api/file/photo/:photoId",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "GET",
+    "path": "/api/file/doc/:docId",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "GET",
+    "path": "/api/file/achiever-stories/download/:storyId",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "GET",
+    "path": "/api/file/achiever-stories/request/download/:storyId",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/file/approve/request",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "POST",
+    "path": "/api/file/photos/review",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "POST",
+    "path": "/api/file/doc/download/:id",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "GET",
+    "path": "/api/form",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "GET",
+    "path": "/api/form/answers",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "GET",
+    "path": "/api/form/answers/active",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "POST",
+    "path": "/api/form/answers",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "POST",
+    "path": "/api/form/answers/review",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "GET",
+    "path": "/api/form/answers/upload/:id",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "POST",
+    "path": "/api/form/search",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "POST",
+    "path": "/api/form/my-requests",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "POST",
+    "path": "/api/admin",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "POST",
+    "path": "/api/admin/download",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "POST",
+    "path": "/api/admin/details",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "POST",
+    "path": "/api/admin/download_files",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "GET",
+    "path": "/api/admin/details/:request_id",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "GET",
+    "path": "/api/config",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "GET",
+    "path": "/api/lookup/province",
+    "auth": "public",
+    "group": "business"
+  },
+  {
+    "method": "GET",
+    "path": "/api/lookup/dayschool/:province",
+    "auth": "public",
+    "group": "business"
+  },
+  {
+    "method": "GET",
+    "path": "/api/lookup/hospital/:province",
+    "auth": "public",
+    "group": "business"
+  },
+  {
+    "method": "GET",
+    "path": "/api/logo-content/:fileId",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "GET",
+    "path": "/api/file/honour",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "POST",
+    "path": "/api/support-requests",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "GET",
+    "path": "/api/support-requests/mine",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "GET",
+    "path": "/api/support-requests/admin",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/support-requests/:id",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "GET",
+    "path": "/api/support-schedule/settings",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/support-schedule/settings",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "GET",
+    "path": "/api/support-schedule/availability",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "GET",
+    "path": "/api/support-schedule/calendar",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "GET",
+    "path": "/api/support-schedule/schedule",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "GET",
+    "path": "/api/support-schedule/fairness",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "GET",
+    "path": "/api/support-schedule/audit-log",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "GET",
+    "path": "/api/support-schedule/team",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "GET",
+    "path": "/api/support-schedule/team/manage",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/support-schedule/team/:userID",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "GET",
+    "path": "/api/support-schedule/requests",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "POST",
+    "path": "/api/support-schedule/requests",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/support-schedule/requests/:id/decision",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/support-schedule/requests/:id/accept-alternative",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/support-schedule/requests/:id/cancel",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "GET",
+    "path": "/api/support-schedule/calls",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "POST",
+    "path": "/api/support-schedule/calls/:id/zoom/start",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/support-schedule/calls/:id/complete",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/support-schedule/calls/:id/reassign",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/support-schedule/schedule/:date/reassign",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "GET",
+    "path": "/api/support-schedule/profile",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "GET",
+    "path": "/api/support-schedule/profile/availability",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "POST",
+    "path": "/api/support-schedule/profile/availability",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/support-schedule/profile/availability/:id",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/support-schedule/profile/availability/:id",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "POST",
+    "path": "/api/support-schedule/maintenance",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "POST",
+    "path": "/api/logs",
+    "auth": "access",
+    "group": "business"
+  },
+  {
+    "method": "POST",
+    "path": "/api/chat",
+    "auth": "access",
+    "group": "chat"
+  },
+  {
+    "method": "GET",
+    "path": "/api/chat/history",
+    "auth": "access",
+    "group": "chat"
+  },
+  {
+    "method": "POST",
+    "path": "/api/chat/tts",
+    "auth": "access",
+    "group": "chat"
+  },
+  {
+    "method": "GET",
+    "path": "/api/chat/describe/:id",
+    "auth": "access",
+    "group": "chat"
+  }
+]

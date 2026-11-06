@@ -11,6 +11,7 @@ type LogController struct {
 }
 
 func (lc *LogController) GetLogs(c *gin.Context) {
+	lc = lc.withContext(c.Request.Context())
 	var input LogFilterInput
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

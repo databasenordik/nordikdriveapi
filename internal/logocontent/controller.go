@@ -16,6 +16,7 @@ type LogoContentController struct {
 }
 
 func (lc *LogoContentController) GetHTMLByFileID(c *gin.Context) {
+	lc = lc.withContext(c.Request.Context())
 	fileIDStr := strings.TrimSpace(c.Param("fileId"))
 	fileID64, err := strconv.ParseUint(fileIDStr, 10, 64)
 	if err != nil || fileID64 == 0 {

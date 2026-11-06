@@ -50,11 +50,13 @@ func RegisterRoutes(r *gin.Engine, service *Service) {
 var authRequired = func() gin.HandlerFunc { return supportScheduleAuthMiddleware() }
 
 func (cc *Controller) GetSettings(c *gin.Context) {
+	cc = cc.withContext(c.Request.Context())
 	result, err := cc.Service.GetSettings()
 	cc.respond(c, result, err)
 }
 
 func (cc *Controller) UpdateSettings(c *gin.Context) {
+	cc = cc.withContext(c.Request.Context())
 	actorID, ok := contextUserID(c)
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user ID"})
@@ -70,6 +72,7 @@ func (cc *Controller) UpdateSettings(c *gin.Context) {
 }
 
 func (cc *Controller) ListAvailability(c *gin.Context) {
+	cc = cc.withContext(c.Request.Context())
 	duration, err := optionalInt(c.Query("duration_minutes"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "duration_minutes must be a positive integer"})
@@ -85,6 +88,7 @@ func (cc *Controller) ListAvailability(c *gin.Context) {
 }
 
 func (cc *Controller) ListCalendar(c *gin.Context) {
+	cc = cc.withContext(c.Request.Context())
 	actorID, ok := contextUserID(c)
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user ID"})
@@ -105,6 +109,7 @@ func (cc *Controller) ListCalendar(c *gin.Context) {
 }
 
 func (cc *Controller) ListSchedule(c *gin.Context) {
+	cc = cc.withContext(c.Request.Context())
 	actorID, ok := contextUserID(c)
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user ID"})
@@ -115,6 +120,7 @@ func (cc *Controller) ListSchedule(c *gin.Context) {
 }
 
 func (cc *Controller) ListFairnessStats(c *gin.Context) {
+	cc = cc.withContext(c.Request.Context())
 	actorID, ok := contextUserID(c)
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user ID"})
@@ -125,6 +131,7 @@ func (cc *Controller) ListFairnessStats(c *gin.Context) {
 }
 
 func (cc *Controller) ListAuditLog(c *gin.Context) {
+	cc = cc.withContext(c.Request.Context())
 	actorID, ok := contextUserID(c)
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user ID"})
@@ -134,11 +141,13 @@ func (cc *Controller) ListAuditLog(c *gin.Context) {
 	cc.respond(c, result, err)
 }
 func (cc *Controller) ListSelectableStaff(c *gin.Context) {
+	cc = cc.withContext(c.Request.Context())
 	result, err := cc.Service.ListSelectableStaff()
 	cc.respond(c, result, err)
 }
 
 func (cc *Controller) ListTeam(c *gin.Context) {
+	cc = cc.withContext(c.Request.Context())
 	actorID, ok := contextUserID(c)
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user ID"})
@@ -149,6 +158,7 @@ func (cc *Controller) ListTeam(c *gin.Context) {
 }
 
 func (cc *Controller) SetTeamMember(c *gin.Context) {
+	cc = cc.withContext(c.Request.Context())
 	actorID, ok := contextUserID(c)
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user ID"})
@@ -169,6 +179,7 @@ func (cc *Controller) SetTeamMember(c *gin.Context) {
 }
 
 func (cc *Controller) ListCalls(c *gin.Context) {
+	cc = cc.withContext(c.Request.Context())
 	actorID, ok := contextUserID(c)
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user ID"})
@@ -179,6 +190,7 @@ func (cc *Controller) ListCalls(c *gin.Context) {
 }
 
 func (cc *Controller) ListRequests(c *gin.Context) {
+	cc = cc.withContext(c.Request.Context())
 	actorID, ok := contextUserID(c)
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user ID"})
@@ -189,6 +201,7 @@ func (cc *Controller) ListRequests(c *gin.Context) {
 }
 
 func (cc *Controller) CreateCall(c *gin.Context) {
+	cc = cc.withContext(c.Request.Context())
 	actorID, ok := contextUserID(c)
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user ID"})
@@ -208,6 +221,7 @@ func (cc *Controller) CreateCall(c *gin.Context) {
 }
 
 func (cc *Controller) DecideRequest(c *gin.Context) {
+	cc = cc.withContext(c.Request.Context())
 	actorID, callID, ok := actorAndCall(c)
 	if !ok {
 		return
@@ -222,6 +236,7 @@ func (cc *Controller) DecideRequest(c *gin.Context) {
 }
 
 func (cc *Controller) AcceptAlternative(c *gin.Context) {
+	cc = cc.withContext(c.Request.Context())
 	actorID, requestID, ok := actorAndCall(c)
 	if !ok {
 		return
@@ -231,6 +246,7 @@ func (cc *Controller) AcceptAlternative(c *gin.Context) {
 }
 
 func (cc *Controller) CancelRequest(c *gin.Context) {
+	cc = cc.withContext(c.Request.Context())
 	actorID, requestID, ok := actorAndCall(c)
 	if !ok {
 		return
@@ -240,6 +256,7 @@ func (cc *Controller) CancelRequest(c *gin.Context) {
 }
 
 func (cc *Controller) CompleteCall(c *gin.Context) {
+	cc = cc.withContext(c.Request.Context())
 	actorID, callID, ok := actorAndCall(c)
 	if !ok {
 		return
@@ -254,6 +271,7 @@ func (cc *Controller) CompleteCall(c *gin.Context) {
 }
 
 func (cc *Controller) StartZoomMeeting(c *gin.Context) {
+	cc = cc.withContext(c.Request.Context())
 	actorID, callID, ok := actorAndCall(c)
 	if !ok {
 		return
@@ -263,6 +281,7 @@ func (cc *Controller) StartZoomMeeting(c *gin.Context) {
 }
 
 func (cc *Controller) ReassignCall(c *gin.Context) {
+	cc = cc.withContext(c.Request.Context())
 	actorID, callID, ok := actorAndCall(c)
 	if !ok {
 		return
@@ -277,6 +296,7 @@ func (cc *Controller) ReassignCall(c *gin.Context) {
 }
 
 func (cc *Controller) ReassignDay(c *gin.Context) {
+	cc = cc.withContext(c.Request.Context())
 	actorID, ok := contextUserID(c)
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user ID"})
@@ -292,6 +312,7 @@ func (cc *Controller) ReassignDay(c *gin.Context) {
 }
 
 func (cc *Controller) ListUnavailability(c *gin.Context) {
+	cc = cc.withContext(c.Request.Context())
 	actorID, ok := contextUserID(c)
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user ID"})
@@ -302,6 +323,7 @@ func (cc *Controller) ListUnavailability(c *gin.Context) {
 }
 
 func (cc *Controller) CreateUnavailability(c *gin.Context) {
+	cc = cc.withContext(c.Request.Context())
 	actorID, ok := contextUserID(c)
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user ID"})
@@ -321,6 +343,7 @@ func (cc *Controller) CreateUnavailability(c *gin.Context) {
 }
 
 func (cc *Controller) UpdateAvailability(c *gin.Context) {
+	cc = cc.withContext(c.Request.Context())
 	actorID, ok := contextUserID(c)
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user ID"})
@@ -341,6 +364,7 @@ func (cc *Controller) UpdateAvailability(c *gin.Context) {
 }
 
 func (cc *Controller) DeleteAvailability(c *gin.Context) {
+	cc = cc.withContext(c.Request.Context())
 	actorID, ok := contextUserID(c)
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user ID"})
@@ -359,6 +383,7 @@ func (cc *Controller) DeleteAvailability(c *gin.Context) {
 }
 
 func (cc *Controller) GetProfile(c *gin.Context) {
+	cc = cc.withContext(c.Request.Context())
 	actorID, ok := contextUserID(c)
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user ID"})
@@ -369,6 +394,7 @@ func (cc *Controller) GetProfile(c *gin.Context) {
 }
 
 func (cc *Controller) RunMaintenance(c *gin.Context) {
+	cc = cc.withContext(c.Request.Context())
 	actorID, ok := contextUserID(c)
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user ID"})

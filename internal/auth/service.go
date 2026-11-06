@@ -5,13 +5,14 @@ import (
 	"fmt"
 	"log"
 	"net/smtp"
-	"nordik-drive-api/config"
-	"nordik-drive-api/internal/mailer"
-	"nordik-drive-api/internal/util"
 	"strings"
 	"time"
 
 	"gorm.io/gorm"
+
+	"nordik-drive-api/config"
+	"nordik-drive-api/internal/mailer"
+	"nordik-drive-api/internal/util"
 )
 
 type AuthService struct {
@@ -35,7 +36,7 @@ func (s *AuthService) CreateUser(user Auth) (*Auth, error) {
 		return nil, err
 	}
 
-	s.triggerSignupEmailAsync(&user)
+	s.triggerSignupEmail(&user)
 
 	return &user, nil
 }
@@ -50,26 +51,26 @@ var triggerPasswordChangedEmailHook = func(user Auth, mailer mailer.EmailSender)
 	return mailer.SendOne(user.Email, "Your password has been changed", body)
 }
 
-func (s *AuthService) triggerSignupEmailAsync(user *Auth) {
+func (s *AuthService) triggerSignupEmail(user *Auth) {
 	if user == nil || s.Mailer == nil {
 		return
 	}
 
 	userCopy := *user
-	go func() {
+	func() {
 		if err := triggerSignupEmailHook(userCopy, s.Mailer); err != nil {
 			log.Printf("signup email: send failed for user_id=%d email=%s err=%v", userCopy.ID, userCopy.Email, err)
 		}
 	}()
 }
 
-func (s *AuthService) triggerPasswordChangedEmailAsync(user *Auth) {
+func (s *AuthService) triggerPasswordChangedEmail(user *Auth) {
 	if user == nil || s.Mailer == nil {
 		return
 	}
 
 	userCopy := *user
-	go func() {
+	func() {
 		if err := triggerPasswordChangedEmailHook(userCopy, s.Mailer); err != nil {
 			log.Printf("password changed email: send failed for user_id=%d email=%s err=%v", userCopy.ID, userCopy.Email, err)
 		}
@@ -193,7 +194,7 @@ func (s *AuthService) ResetPassword(email, code, newPassword string) (*Auth, err
 		return nil, err
 	}
 
-	s.triggerPasswordChangedEmailAsync(&user)
+	s.triggerPasswordChangedEmail(&user)
 
 	return &user, nil
 }

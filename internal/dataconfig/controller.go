@@ -23,6 +23,7 @@ type DataConfigController struct {
 // - RFC3339 / RFC3339Nano (recommended)
 // - unix milliseconds (e.g., 1708451234567)
 func (cc *DataConfigController) GetConfig(c *gin.Context) {
+	cc = cc.withContext(c.Request.Context())
 	fileName := strings.TrimSpace(c.Query("file_name"))
 	if fileName == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "file_name is required"})

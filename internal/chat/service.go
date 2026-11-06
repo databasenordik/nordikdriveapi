@@ -18,13 +18,14 @@ import (
 	"strings"
 	"sync"
 
-	f "nordik-drive-api/internal/file"
-
 	"golang.org/x/oauth2/google"
 	"golang.org/x/sync/singleflight"
 	"google.golang.org/api/googleapi"
 	"google.golang.org/genai"
 	"gorm.io/gorm"
+
+	f "nordik-drive-api/internal/file"
+	"nordik-drive-api/internal/requestscope"
 )
 
 type ChatService struct {
@@ -35,6 +36,12 @@ type ChatService struct {
 	ProjectID string
 	Location  string
 
+	stateMu       sync.Mutex
+	state         *chatState
+	QueryStrategy ChatQueryStrategy
+}
+
+type chatState struct {
 	datasetCache           chatBoundedCache
 	structuredDatasetCache chatBoundedCache
 	databaseQueryCache     chatBoundedCache
@@ -44,7 +51,15 @@ type ChatService struct {
 	fileLookupGroup        singleflight.Group
 	fastRouteGroup         singleflight.Group
 	fullGenerationGroup    singleflight.Group
-	QueryStrategy          ChatQueryStrategy
+}
+
+func (cs *ChatService) sharedState() *chatState {
+	cs.stateMu.Lock()
+	defer cs.stateMu.Unlock()
+	if cs.state == nil {
+		cs.state = &chatState{}
+	}
+	return cs.state
 }
 
 var (
@@ -217,7 +232,7 @@ func (cs *ChatService) generateRowNarrative(rowID int, instruction string) (stri
 		rowJSON,
 	)
 
-	ctx := context.Background()
+	ctx := requestscope.Context(cs.DB)
 	out, usedModel, err := cs.generateFromPrompt(ctx, prompt, nil, "")
 	if err != nil {
 		return "", fmt.Errorf("generation error (%s): %w", usedModel, err)
@@ -251,7 +266,7 @@ func (cs *ChatService) getQueryStrategy() ChatQueryStrategy {
 }
 
 func (cs *ChatService) TTS(text string) (*TTSAudio, error) {
-	ctx := context.Background()
+	ctx := requestscope.Context(cs.DB)
 
 	project := strings.TrimSpace(cs.ProjectID)
 	loc := strings.TrimSpace(cs.Location)

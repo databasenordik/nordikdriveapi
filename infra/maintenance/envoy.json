@@ -1,0 +1,40 @@
+{
+  "static_resources": {
+    "listeners": [{
+      "name": "development-maintenance",
+      "address": { "socket_address": { "address": "0.0.0.0", "port_value": 8080 } },
+      "filter_chains": [{
+        "filters": [{
+          "name": "envoy.filters.network.http_connection_manager",
+          "typed_config": {
+            "@type": "type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager",
+            "stat_prefix": "maintenance",
+            "use_remote_address": true,
+            "skip_xff_append": true,
+            "route_config": {
+              "name": "maintenance",
+              "virtual_hosts": [{
+                "name": "development-api",
+                "domains": ["*"],
+                "routes": [
+                  {
+                    "match": { "path": "/healthz" },
+                    "direct_response": { "status": 200, "body": { "inline_string": "maintenance" } },
+                    "response_headers_to_add": [{
+                      "header": { "key": "x-m2-forwarded-for", "value": "%REQ(X-FORWARDED-FOR)%" }
+                    }]
+                  },
+                  { "match": { "prefix": "/" }, "direct_response": { "status": 503, "body": { "inline_string": "Development API maintenance. Please retry shortly." } } }
+                ]
+              }]
+            },
+            "http_filters": [{
+              "name": "envoy.filters.http.router",
+              "typed_config": { "@type": "type.googleapis.com/envoy.extensions.filters.http.router.v3.Router" }
+            }]
+          }
+        }]
+      }]
+    }]
+  }
+}

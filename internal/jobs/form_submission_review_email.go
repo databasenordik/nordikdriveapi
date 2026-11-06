@@ -5,10 +5,11 @@ import (
 	"log"
 	"strings"
 
+	"gorm.io/gorm"
+
 	"nordik-drive-api/internal/formsubmission"
 	"nordik-drive-api/internal/mailer"
-
-	"gorm.io/gorm"
+	"nordik-drive-api/internal/requestscope"
 )
 
 type FormSubmissionReviewEmailJob struct {
@@ -67,6 +68,9 @@ func (j *FormSubmissionReviewEmailJob) Run() error {
 	}
 
 	for _, row := range rows {
+		if err := requestscope.Context(j.DB).Err(); err != nil {
+			return err
+		}
 		email := strings.TrimSpace(row.CreatedUserEmail)
 		if email == "" {
 			if j.Logger != nil {

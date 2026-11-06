@@ -1,0 +1,62 @@
+# Development only. Copy to ignored nordikdrive.tfvars for the first real plan.
+# Bootstrap creates metadata/IAM only. No database users or runtime revisions.
+deployment_stage = "bootstrap"
+enable_preview_gateway = false
+project_id          = "planar-ray-472112-e8"
+region              = "us-west1"
+sql_instance_name   = "nordikdrive"
+sql_connection_name = "planar-ray-472112-e8:us-west1:nordikdrive"
+database_name       = "postgres"
+sql_ip_type         = "public"
+
+database_connection_capacity            = 25
+database_superuser_reserved_connections = 3
+db_pool_limits                          = { gateway = 1, legacy = 2, worker = 2, cleanup = 1 }
+max_instances                           = { gateway = 1, legacy = 1, worker = 1 }
+rollout_extra_instances                 = { gateway = 1, legacy = 1, worker = 1 }
+worker_request_concurrency              = 1
+
+# Other applications remain unchanged. The user allocated one connection to
+# the existing outside client; this is a planning allowance, not an enforced cap.
+# Reserve NIA 4 (two pools, serving/replacement) + operator 1 + outside 1 = 6.
+# With the single gateway, the controlled rollout allocates 17 of the 20 slots.
+# Keep review false until NIA limits and retirement of the old Drive API are checked.
+other_reserved_connections = 6
+connection_budget_reviewed = false
+
+iam_database_authentication_verified = false
+runtime_prerequisites_verified = false
+legacy_scheduling_retired_verified = false
+
+# Proposed secret metadata IDs. No versions/payloads have been provisioned yet.
+jwt_secret = { secret_id = "nordikdrive-m2-jwt", version = "1" }
+runtime_secrets = {
+  gateway = {}
+  legacy = {
+    GMAIL_APP_PASSWORD = { secret_id = "nordikdrive-m2-smtp", version = "1" }
+    ZOOM_CLIENT_SECRET = { secret_id = "nordikdrive-m2-zoom", version = "1" }
+  }
+  worker = {
+    GMAIL_APP_PASSWORD = { secret_id = "nordikdrive-m2-smtp", version = "1" }
+    ZOOM_CLIENT_SECRET = { secret_id = "nordikdrive-m2-zoom", version = "1" }
+  }
+}
+deployer_service_account = "github-nordik-drive-deployer@planar-ray-472112-e8.iam.gserviceaccount.com"
+preview_invoker_members = ["user:datanorthnordik@gmail.com"]
+buckets_by_owner = {
+  legacy = ["nordik-drive-photos"]
+  worker = ["nordik-drive-photos"]
+}
+nia_service_name = "nordik-nia-api"
+nia_region = "us-west1"
+
+public_gateway   = false
+enable_schedules = false
+rate_limit_mode  = "observe"
+
+# Supply actual images, numeric secret references, sender/Zoom/NIA settings,
+# verified proxy hops and required buckets in a separate reviewed release file.
+# Preserve CHAT_USE_NIA=true, current Zoom settings and the existing JWT value.
+# The public service is added only during cutover, at gateway["public"]. Import
+# it before applying cutover and set the compatible current revision explicitly.
+public_gateway_service_name = "nordikdriveapi"

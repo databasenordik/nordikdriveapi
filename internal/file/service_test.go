@@ -1665,7 +1665,7 @@ func TestFileService_ReviewEditRequest_AddInformationUsesCurrentVersionAndUpdate
 
 	prevMove := moveGCSFolderHook
 	t.Cleanup(func() { moveGCSFolderHook = prevMove })
-	moveGCSFolderHook = func(bucket, src, dst string) (map[string]string, error) {
+	moveGCSFolderHook = func(_ context.Context, bucket, src, dst string) (map[string]string, error) {
 		return map[string]string{}, nil
 	}
 
@@ -2566,7 +2566,7 @@ func TestFileService_CreateEditRequest_AllBranches(t *testing.T) {
 	t.Cleanup(func() { uploadToGCSHook = prevUpload })
 
 	var uploadedPaths []string
-	uploadToGCSHook = func(base64, bucket, objectPath string) (string, int64, error) {
+	uploadToGCSHook = func(_ context.Context, base64, bucket, objectPath string) (string, int64, error) {
 		uploadedPaths = append(uploadedPaths, objectPath)
 		return "gs://" + bucket + "/" + objectPath, 123, nil
 	}
@@ -2581,7 +2581,7 @@ func TestFileService_CreateEditRequest_AllBranches(t *testing.T) {
 	// details insert error
 	db = newTestDB(t)
 	svc = &FileService{DB: db}
-	uploadToGCSHook = func(base64, bucket, objectPath string) (string, int64, error) {
+	uploadToGCSHook = func(_ context.Context, base64, bucket, objectPath string) (string, int64, error) {
 		return "gs://" + bucket + "/" + objectPath, 123, nil
 	}
 	_ = db.Migrator().DropTable(&FileEditRequestDetails{})
@@ -2600,7 +2600,7 @@ func TestFileService_CreateEditRequest_AllBranches(t *testing.T) {
 	// upload error
 	db = newTestDB(t)
 	svc = &FileService{DB: db}
-	uploadToGCSHook = func(_, _, _ string) (string, int64, error) {
+	uploadToGCSHook = func(_ context.Context, _, _, _ string) (string, int64, error) {
 		return "", 0, errors.New("upload fail")
 	}
 	_, err = svc.CreateEditRequest(EditRequestInput{
@@ -2621,7 +2621,7 @@ func TestFileService_CreateEditRequest_AllBranches(t *testing.T) {
 	// photo record insert error
 	db = newTestDB(t)
 	svc = &FileService{DB: db}
-	uploadToGCSHook = func(base64, bucket, objectPath string) (string, int64, error) {
+	uploadToGCSHook = func(_ context.Context, base64, bucket, objectPath string) (string, int64, error) {
 		return "gs://" + bucket + "/" + objectPath, 123, nil
 	}
 	_ = db.Migrator().DropTable(&FileEditRequestPhoto{})
@@ -2644,7 +2644,7 @@ func TestFileService_CreateEditRequest_AllBranches(t *testing.T) {
 	db = newTestDB(t)
 	svc = &FileService{DB: db}
 	call := 0
-	uploadToGCSHook = func(_, _, _ string) (string, int64, error) {
+	uploadToGCSHook = func(_ context.Context, _, _, _ string) (string, int64, error) {
 		call++
 		if call == 1 {
 			return "gs://b/x", 1, nil // app photo ok
@@ -2673,7 +2673,7 @@ func TestFileService_CreateEditRequest_AllBranches(t *testing.T) {
 	db = newTestDB(t)
 	svc = &FileService{DB: db}
 
-	uploadToGCSHook = func(_, _, _ string) (string, int64, error) {
+	uploadToGCSHook = func(_ context.Context, _, _, _ string) (string, int64, error) {
 		return "", 0, errors.New("doc upload fail")
 	}
 	_, err = svc.CreateEditRequest(EditRequestInput{
@@ -2694,7 +2694,7 @@ func TestFileService_CreateEditRequest_AllBranches(t *testing.T) {
 	svc = &FileService{DB: db}
 
 	uploadedPaths = nil
-	uploadToGCSHook = func(base64, bucket, objectPath string) (string, int64, error) {
+	uploadToGCSHook = func(_ context.Context, base64, bucket, objectPath string) (string, int64, error) {
 		uploadedPaths = append(uploadedPaths, objectPath)
 		return "gs://" + bucket + "/" + objectPath, 123, nil
 	}
@@ -2759,7 +2759,7 @@ func TestFileService_CreateEditRequest_PhotoExtension_FromFilenameOrMime(t *test
 	t.Cleanup(func() { uploadToGCSHook = prevUpload })
 
 	var uploadedPaths []string
-	uploadToGCSHook = func(base64, bucket, objectPath string) (string, int64, error) {
+	uploadToGCSHook = func(_ context.Context, base64, bucket, objectPath string) (string, int64, error) {
 		uploadedPaths = append(uploadedPaths, objectPath)
 		return "gs://" + bucket + "/" + objectPath, 123, nil
 	}
@@ -2824,7 +2824,7 @@ func TestFileService_AchieverStoryRequestLifecycle(t *testing.T) {
 	formSubmissionGoHook = func(func()) {}
 	var uploadedData string
 	var uploadedPath string
-	uploadToGCSHook = func(data, bucket, objectPath string) (string, int64, error) {
+	uploadToGCSHook = func(_ context.Context, data, bucket, objectPath string) (string, int64, error) {
 		uploadedData = data
 		uploadedPath = objectPath
 		return "gs://" + bucket + "/" + objectPath, int64(len(data)), nil
@@ -2902,7 +2902,7 @@ func TestFileService_AchieverStoryRequestLifecycle(t *testing.T) {
 		t.Fatalf("published stories = %#v, err=%v", published, err)
 	}
 
-	uploadToGCSHook = func(_, bucket, objectPath string) (string, int64, error) {
+	uploadToGCSHook = func(_ context.Context, _, bucket, objectPath string) (string, int64, error) {
 		uploadedPath = objectPath
 		return "gs://" + bucket + "/" + objectPath, 12, nil
 	}
@@ -3066,7 +3066,7 @@ func TestFileService_ReviewEditRequest_AllBranches(t *testing.T) {
 	// restore hooks
 	prevMove := moveGCSFolderHook
 	t.Cleanup(func() { moveGCSFolderHook = prevMove })
-	moveGCSFolderHook = func(bucket, src, dst string) (map[string]string, error) {
+	moveGCSFolderHook = func(_ context.Context, bucket, src, dst string) (map[string]string, error) {
 		return map[string]string{}, nil
 	}
 
@@ -3118,7 +3118,7 @@ func TestFileService_ReviewEditRequest_AllBranches(t *testing.T) {
 	// move folder hook error
 	db = newTestDB(t)
 	svc = &FileService{DB: db, Mailer: mailer.NewService("test@example.com", "key", "domain", "http://localhost")}
-	moveGCSFolderHook = func(bucket, src, dst string) (map[string]string, error) {
+	moveGCSFolderHook = func(_ context.Context, bucket, src, dst string) (map[string]string, error) {
 		return nil, errors.New("move fail")
 	}
 	req = FileEditRequest{UserID: 1, Status: "pending", IsEdited: false, FirstName: "A", LastName: "B", RowID: 0, FileID: 10}
@@ -3132,7 +3132,9 @@ func TestFileService_ReviewEditRequest_AllBranches(t *testing.T) {
 	// NOT EDITED success
 	db = newTestDB(t)
 	svc = &FileService{DB: db, Mailer: mailer.NewService("test@example.com", "key", "domain", "http://localhost")}
-	moveGCSFolderHook = func(bucket, src, dst string) (map[string]string, error) { return map[string]string{}, nil }
+	moveGCSFolderHook = func(_ context.Context, bucket, src, dst string) (map[string]string, error) {
+		return map[string]string{}, nil
+	}
 
 	req = FileEditRequest{UserID: 1, Status: "pending", IsEdited: false, FirstName: "A", LastName: "B", RowID: 0, FileID: 10}
 	_ = db.Create(&req).Error

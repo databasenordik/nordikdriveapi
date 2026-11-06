@@ -15,18 +15,29 @@ RUN go mod download
 COPY . .
 
 # Build the binary
-RUN go build -o nordik-drive-api ./cmd/server
+RUN go build -trimpath -buildvcs=false -o nordik-drive-api ./cmd/server && \
+    go build -trimpath -buildvcs=false -o nordik-gateway ./cmd/gateway
+
+# Local/CI verification only; never deployed as an application image.
+FROM builder AS verification
+RUN apk add --no-cache docker-cli build-base
+CMD ["go", "test", "./..."]
 
 # ----------------------
 # Final stage
 # ----------------------
-FROM alpine:latest
+FROM alpine:3.22 AS runtime
 WORKDIR /app
 
 # Install CA certificates (for outbound HTTPS requests to other services)
-RUN apk add --no-cache ca-certificates
+RUN apk add --no-cache ca-certificates tzdata
 
 # Copy the binary from builder
+FROM runtime AS gateway
+COPY --from=builder /app/nordik-gateway /app/nordik-gateway
+ENTRYPOINT ["/app/nordik-gateway"]
+
+FROM runtime AS server
 COPY --from=builder /app/nordik-drive-api .
 
 # Expose Cloud Run HTTP port

@@ -27,6 +27,20 @@ go.work.sum
 
 # env file
 .env
+gha-creds-*.json
+
+# Local provisioning state and caches (never store secret values in tfvars).
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+*.tfplan
+crash.log
+.cache/
+.tools/
+__pycache__/
+*.py[cod]
 
 # Temporary deceased import tooling
 Deceased/

@@ -1,0 +1,64 @@
+name: Stage one development runtime revision
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        type: choice
+        options: [monolith, worker, gateway-adapter]
+        required: true
+      image:
+        description: Immutable image URI ending in @sha256:digest
+        type: string
+        required: true
+permissions:
+  contents: read
+  id-token: write
+concurrency:
+  group: runtime-deploy-${{ inputs.target }}
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: development
+    env:
+      TARGET: ${{ inputs.target }}
+      IMAGE: ${{ inputs.image }}
+      LEGACY_SERVICE: ${{ vars.LEGACY_CLOUD_RUN_SERVICE || 'nordikdriveapi-legacy' }}
+      WORKER_SERVICE: ${{ vars.WORKER_CLOUD_RUN_SERVICE || 'nordikdriveapi-worker' }}
+      GATEWAY_SERVICE: ${{ vars.GATEWAY_CLOUD_RUN_SERVICE || 'nordikdriveapi' }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: auth
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: projects/724838782318/locations/global/workloadIdentityPools/github-pool-api/providers/github-provider-api
+          service_account: github-nordik-drive-deployer@planar-ray-472112-e8.iam.gserviceaccount.com
+          token_format: access_token
+          create_credentials_file: false
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Create revision without moving traffic
+        shell: bash
+        env:
+          CLOUDSDK_AUTH_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        run: |
+          set -euo pipefail
+          [[ "$IMAGE" =~ ^us-west1-docker.pkg.dev/planar-ray-472112-e8/nordikdriveapi/[a-zA-Z0-9_-]+@sha256:[a-f0-9]{64}$ ]]
+          container=()
+          case "$TARGET" in
+            monolith)
+              service="$LEGACY_SERVICE"
+              [[ "$service" == nordikdriveapi-legacy ]]
+              ;;
+            worker)
+              service="$WORKER_SERVICE"
+              [[ "$service" == nordikdriveapi-worker ]]
+              ;;
+            gateway-adapter)
+              service="$GATEWAY_SERVICE"
+              [[ "$service" == nordikdriveapi-gateway || "$service" == nordikdriveapi ]]
+              container=(--container authorization)
+              ;;
+            *) exit 1 ;;
+          esac
+          test -n "$service"
+          gcloud run services update "$service" --project planar-ray-472112-e8 --region us-west1 --image "$IMAGE" "${container[@]}" --no-traffic

@@ -1,4 +1,4 @@
-﻿# Deploy Milestone 2 to the existing development project
+# Deploy Milestone 2 to the existing development project
 
 This is the deployment procedure for **nordikdriveapi**, in the existing Google
 Cloud project **planar-ray-472112-e8**, region **us-west1**. It uses the current
@@ -230,7 +230,7 @@ if (-not (Test-Path 'infra\terraform\nordikdrive.tfvars')) {
     Copy-Item 'infra\terraform\nordikdrive.tfvars.example' 'infra\terraform\nordikdrive.tfvars'
 }
 Invoke-M2Terraform init
-Invoke-M2Terraform plan -var-file=nordikdrive.tfvars -out=bootstrap.tfplan
+Invoke-M2Terraform plan '-var-file=nordikdrive.tfvars' '-out=bootstrap.tfplan'
 Invoke-M2Terraform show bootstrap.tfplan
 ```
 
@@ -323,7 +323,7 @@ $flags = @($sqlSettings.settings.databaseFlags | Where-Object { $null -ne $_ })
 $iamOn = @($flags | Where-Object { $_.name -eq 'cloudsql.iam_authentication' -and $_.value -eq 'on' }).Count -eq 1
 if (-not $iamOn) {
     if ($flags.Count -ne 0) { throw 'Other flags now exist. Preserve their values when preparing the IAM flag update.' }
-    gcloud sql instances patch nordikdrive --project=$projectId --database-flags=cloudsql.iam_authentication=on
+    gcloud sql instances patch nordikdrive --project=$projectId '--database-flags=cloudsql.iam_authentication=on'
     Assert-M2Command
 }
 gcloud sql instances describe nordikdrive --project=$projectId --format='yaml(settings.databaseFlags)'
@@ -348,7 +348,7 @@ Set the database stage in the local release file:
 $release | Add-Member -NotePropertyName deployment_stage -NotePropertyValue 'database' -Force
 $release | Add-Member -NotePropertyName iam_database_authentication_verified -NotePropertyValue $true -Force
 [IO.File]::WriteAllText($releaseFile,($release | ConvertTo-Json -Depth 12),(New-Object Text.UTF8Encoding($false)))
-Invoke-M2Terraform plan -var-file=nordikdrive.tfvars -var-file=release.tfvars.json -out=database.tfplan
+Invoke-M2Terraform plan '-var-file=nordikdrive.tfvars' '-var-file=release.tfvars.json' '-out=database.tfplan'
 Invoke-M2Terraform show database.tfplan
 ```
 
@@ -568,7 +568,7 @@ $release | Add-Member -NotePropertyName connection_budget_reviewed -NoteProperty
 if (-not (Test-Path 'infra\terraform\public-import.tf')) {
     Copy-Item 'infra\terraform\public-import.tf.example' 'infra\terraform\public-import.tf'
 }
-Invoke-M2Terraform plan -var-file=nordikdrive.tfvars -var-file=release.tfvars.json -out=candidate.tfplan
+Invoke-M2Terraform plan '-var-file=nordikdrive.tfvars' '-var-file=release.tfvars.json' '-out=candidate.tfplan'
 Invoke-M2Terraform show candidate.tfplan
 ```
 
@@ -620,7 +620,7 @@ if ($gatewayRevision -notmatch '^nordikdriveapi-[0-9]+-[a-z0-9]+$') { throw 'Une
 $release.public_serving_revision = $gatewayRevision
 $release.stage_public_candidate = $false
 [IO.File]::WriteAllText($releaseFile,($release | ConvertTo-Json -Depth 12),(New-Object Text.UTF8Encoding($false)))
-Invoke-M2Terraform plan -var-file=nordikdrive.tfvars -var-file=release.tfvars.json -out=promote.tfplan
+Invoke-M2Terraform plan '-var-file=nordikdrive.tfvars' '-var-file=release.tfvars.json' '-out=promote.tfplan'
 Invoke-M2Terraform show promote.tfplan
 Invoke-M2Terraform apply promote.tfplan
 ```
@@ -641,7 +641,7 @@ after verifying providers/recipients and worker permissions.
 $release | Add-Member -NotePropertyName legacy_scheduling_retired_verified -NotePropertyValue $true -Force
 $release | Add-Member -NotePropertyName enable_schedules -NotePropertyValue $true -Force
 [IO.File]::WriteAllText($releaseFile,($release | ConvertTo-Json -Depth 12),(New-Object Text.UTF8Encoding($false)))
-Invoke-M2Terraform plan -var-file=nordikdrive.tfvars -var-file=release.tfvars.json -out=schedules.tfplan
+Invoke-M2Terraform plan '-var-file=nordikdrive.tfvars' '-var-file=release.tfvars.json' '-out=schedules.tfplan'
 Invoke-M2Terraform show schedules.tfplan
 Invoke-M2Terraform apply schedules.tfplan
 gcloud scheduler jobs list --project=$projectId --location=$deployRegion --format='table(name,schedule,timeZone,state)'

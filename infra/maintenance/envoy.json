@@ -18,7 +18,7 @@
                 "domains": ["*"],
                 "routes": [
                   {
-                    "match": { "path": "/healthz" },
+                    "match": { "path": "/m2-health" },
                     "direct_response": { "status": 200, "body": { "inline_string": "maintenance" } },
                     "response_headers_to_add": [{
                       "header": { "key": "x-m2-forwarded-for", "value": "%REQ(X-FORWARDED-FOR)%" }

@@ -204,9 +204,32 @@ worker core 96.1%. Linux race checks pass. The integrated Terraform module
 validates and passes 38 mock checks (8 original, 14 budget, 16 rollout).
 Workflow lint passes. NIA and unchanged outside consumers share the 25-slot
 instance; outside application quotas are not changed by this release. Outside applications are
-excluded from this release. A review-only bootstrap
-plan has 44 additions, zero updates/deletes and has not been applied. None of
-these results establishes cloud acceptance or milestone completion.
+excluded from this release. The reviewed bootstrap plan's 44 additions were
+applied to development on 2026-11-06, followed by the database IAM users and
+three migrations. Local results alone do not establish cloud acceptance.
+
+### Recorded development rollout
+
+The development gateway uses the existing nordikdriveapi service and URL;
+its Envoy and authorization containers share that instance. The business API
+and worker run separately in nordikdriveapi-legacy and nordikdriveapi-worker.
+The reviewed connection allocation is 17 of 20 slots. Local Terraform state
+and private backups remain in place; secret payloads are held in Secret Manager.
+
+The database backup completed before IAM authentication and migrations were
+applied. The gateway's public login/file/chat preflights passed with the actual
+frontend origin and credential support. Direct unauthenticated backend/worker
+requests were rejected. The user confirmed login, files and chat, including a
+new chat message after NIA's public invoker grant was removed. An anonymous
+NIA gRPC call was also rejected. NIA uses two pools of one, with both instance
+maxima set to one. The old API/NIA revisions retired and honour-daily is paused.
+
+Worker acceptance remains pending: real Scheduler deliveries used a short job
+ID while the worker required a qualified resource name. The narrow compatibility
+fix accepts either exact form, retaining registered-job and timestamp checks
+behind Cloud Run IAM. Confirm successful natural deliveries in the ledger before
+marking this deployment complete. The interval with rejected deliveries must
+remain recorded; do not claim the missed daily slots were replayed.
 
 Verified on 2026-11-03; these are local/synthetic checks, not cloud acceptance.
 

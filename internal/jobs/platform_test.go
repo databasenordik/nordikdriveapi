@@ -20,6 +20,10 @@ func TestWorkerRejectsUnknownJobsAndInvalidSchedulerIdentity(t *testing.T) {
 	}{
 		{"/internal/jobs/unknown/run", "", "", 404},
 		{"/internal/jobs/fixture/run", "forged", "", 403},
+		{"/internal/jobs/fixture/run", "", "bad", 403},
+		{"/internal/jobs/fixture/run", "other", "bad", 403},
+		{"/internal/jobs/fixture/run", "projects/other/locations/test/jobs/fixture", "bad", 403},
+		{"/internal/jobs/fixture/run", "fixture", "bad", 400},
 		{"/internal/jobs/fixture/run", "projects/test/locations/test/jobs/fixture", "bad", 400},
 		{"/internal/jobs/fixture/run", "projects/test/locations/test/jobs/fixture", time.Now().Add(time.Hour).Format(time.RFC3339), 400},
 	} {
@@ -31,6 +35,19 @@ func TestWorkerRejectsUnknownJobsAndInvalidSchedulerIdentity(t *testing.T) {
 		if response.Code != tc.status {
 			t.Fatalf("status %d want %d", response.Code, tc.status)
 		}
+	}
+}
+
+func TestWorkerStillRequiresConfiguredSchedulerPrefix(t *testing.T) {
+	router := gin.New()
+	RegisterWorker(router, &Runner{Jobs: map[string]RunFunc{"fixture": func(context.Context) error { return nil }}}, "")
+	req := httptest.NewRequest("POST", "/internal/jobs/fixture/run", nil)
+	req.Header.Set("X-CloudScheduler-JobName", "fixture")
+	req.Header.Set("X-CloudScheduler-ScheduleTime", "bad")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, req)
+	if response.Code != 403 {
+		t.Fatalf("unconfigured worker status %d want 403", response.Code)
 	}
 }
 

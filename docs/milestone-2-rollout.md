@@ -520,14 +520,20 @@ the image, pool setting and instance limits:
 $niaBefore = gcloud run services describe nordik-nia-api --project=$projectId --region=$deployRegion --format='json(status.traffic)' | ConvertFrom-Json
 Assert-M2Command
 $niaOld = @($niaBefore.status.traffic | Where-Object { $_.percent -eq 100 })[0].revisionName
-gcloud run deploy nordik-nia-api --project=$projectId --region=$deployRegion --image=$niaImage --update-env-vars=NIA_DB_POOL_MAX=1 --max=1 --max-instances=1 --no-traffic
+gcloud run deploy nordik-nia-api --project=$projectId --region=$deployRegion --image=$niaImage --update-env-vars=NIA_DB_POOL_MAX=1 --max=1 --max-instances=1 --no-traffic --tag=m2-pools
 Assert-M2Command
 $niaNew = gcloud run services describe nordik-nia-api --project=$projectId --region=$deployRegion --format='value(status.latestReadyRevisionName)'
 Assert-M2Command
 if (-not $niaNew -or $niaNew -eq $niaOld) { throw 'The NIA pool revision is not ready.' }
 gcloud run services update-traffic nordik-nia-api --project=$projectId --region=$deployRegion "--to-revisions=$niaNew=100"
 Assert-M2Command
+gcloud run services update-traffic nordik-nia-api --project=$projectId --region=$deployRegion --remove-tags=m2-pools
+Assert-M2Command
 ```
+
+The temporary tag activates the zero-traffic revision for startup verification.
+Without a tag, an unserved revision can remain inactive and latestReadyRevisionName
+can still name the previous image. Do not promote that previous name by mistake.
 
 Check its startup readiness; wait for old NIA calls to drain and remove any old
 revision tags. Retire the saved old revision after verifying the new one. No

@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -19,7 +20,11 @@ func RegisterWorker(router *gin.Engine, runner *Runner, expectedPrefix string) {
 			c.JSON(404, gin.H{"error": "Unknown job", "code": "NOT_FOUND"})
 			return
 		}
-		if expectedPrefix == "" || c.GetHeader("X-CloudScheduler-JobName") != strings.TrimSuffix(expectedPrefix, "/")+"/"+name {
+		// HTTP deliveries may use the job ID rather than its qualified resource
+		// name. These identify the slot; Cloud Run IAM authenticates the caller.
+		jobName := c.GetHeader("X-CloudScheduler-JobName")
+		if expectedPrefix == "" || (jobName != name && jobName != strings.TrimSuffix(expectedPrefix, "/")+"/"+name) {
+			slog.WarnContext(c.Request.Context(), "scheduler_job_mismatch", "job", name, "received_job", c.GetHeader("X-CloudScheduler-JobName"), "expected_job", strings.TrimSuffix(expectedPrefix, "/")+"/"+name)
 			c.JSON(403, gin.H{"error": "Unexpected scheduler job", "code": "FORBIDDEN"})
 			return
 		}

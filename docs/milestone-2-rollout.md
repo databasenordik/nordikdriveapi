@@ -423,13 +423,13 @@ $serving = @($current.status.traffic | Where-Object { $_.percent -eq 100 })
 if ($serving.Count -ne 1) { throw 'Inspect split traffic before changing it.' }
 $apiOld = $serving[0].revisionName
 $maintenanceFlags = @{
-    image = 'envoyproxy/envoy@sha256:93a82e7584cb8181ad408e4e49477a3ae1d775f698214841eda4e9309fc06a06'
-    command = @('/usr/local/bin/envoy')
-    args = @('--config-yaml',(Get-Content 'infra\maintenance\envoy.json' -Raw),'--disable-hot-restart')
-    max = 1
-    'max-instances' = 1
-    'no-traffic' = $true
-    tag = 'm2-maintenance'
+    '--image' = 'envoyproxy/envoy@sha256:93a82e7584cb8181ad408e4e49477a3ae1d775f698214841eda4e9309fc06a06'
+    '--command' = @('/usr/local/bin/envoy')
+    '--args' = @('--config-yaml',(Get-Content 'infra\maintenance\envoy.json' -Raw),'--disable-hot-restart')
+    '--max' = 1
+    '--max-instances' = 1
+    '--no-traffic' = $true
+    '--tag' = 'm2-maintenance'
 }
 $maintenanceFlagsFile = Join-Path (Get-Location).Path '.cache\m2-maintenance-flags.json'
 [IO.File]::WriteAllText($maintenanceFlagsFile,($maintenanceFlags | ConvertTo-Json -Depth 8),(New-Object Text.UTF8Encoding($false)))
@@ -450,12 +450,15 @@ credential loss. Importing the maintenance template copies no payloads into stat
 
 Measure forwarded headers through this tagged URL. The maintenance health route
 reflects only the forwarded-IP chain, not cookies, authorization or credentials.
+Use /m2-health for this public probe. Cloud Run reserves some paths ending in z,
+including /healthz; the gateway's internal startup probe still uses /healthz.
+See [Cloud Run reserved paths](https://docs.cloud.google.com/run/docs/known-issues#reserved_url_paths).
 The deliberately fake address below verifies that a caller-supplied address is
 not selected as the real client:
 
 ```powershell
 $probeId = [guid]::NewGuid().ToString('N')
-$probe = Invoke-WebRequest "$maintenanceUrl/healthz?m2_probe=$probeId" -Headers @{ 'X-Forwarded-For' = '198.51.100.10' } -UseBasicParsing
+$probe = Invoke-WebRequest "$maintenanceUrl/m2-health?m2_probe=$probeId" -Headers @{ 'X-Forwarded-For' = '198.51.100.10' } -UseBasicParsing
 $forwarded = @(([string]$probe.Headers['x-m2-forwarded-for']).Split(',') | ForEach-Object { $_.Trim() })
 $logFilter = 'resource.type="cloud_run_revision" AND resource.labels.service_name="nordikdriveapi" AND httpRequest.requestUrl:"m2_probe=' + $probeId + '"'
 $observedIp = ''
@@ -517,14 +520,20 @@ the image, pool setting and instance limits:
 $niaBefore = gcloud run services describe nordik-nia-api --project=$projectId --region=$deployRegion --format='json(status.traffic)' | ConvertFrom-Json
 Assert-M2Command
 $niaOld = @($niaBefore.status.traffic | Where-Object { $_.percent -eq 100 })[0].revisionName
-gcloud run deploy nordik-nia-api --project=$projectId --region=$deployRegion --image=$niaImage --update-env-vars=NIA_DB_POOL_MAX=1 --max=1 --max-instances=1 --no-traffic
+gcloud run deploy nordik-nia-api --project=$projectId --region=$deployRegion --image=$niaImage --update-env-vars=NIA_DB_POOL_MAX=1 --max=1 --max-instances=1 --no-traffic --tag=m2-pools
 Assert-M2Command
 $niaNew = gcloud run services describe nordik-nia-api --project=$projectId --region=$deployRegion --format='value(status.latestReadyRevisionName)'
 Assert-M2Command
 if (-not $niaNew -or $niaNew -eq $niaOld) { throw 'The NIA pool revision is not ready.' }
 gcloud run services update-traffic nordik-nia-api --project=$projectId --region=$deployRegion "--to-revisions=$niaNew=100"
 Assert-M2Command
+gcloud run services update-traffic nordik-nia-api --project=$projectId --region=$deployRegion --remove-tags=m2-pools
+Assert-M2Command
 ```
+
+The temporary tag activates the zero-traffic revision for startup verification.
+Without a tag, an unserved revision can remain inactive and latestReadyRevisionName
+can still name the previous image. Do not promote that previous name by mistake.
 
 Check its startup readiness; wait for old NIA calls to drain and remove any old
 revision tags. Retire the saved old revision after verifying the new one. No
@@ -598,7 +607,7 @@ Do not send real notification jobs merely as a health check.
 
 | Test through the milestone2 tag | Result required before promotion |
 | --- | --- |
-| GET /healthz | HTTP 200 |
+| Cloud Run startup probes and a public request to a known API route | Probes pass; API returns the expected response/status |
 | Login/refresh with your controlled test account | Correct success response and cookie |
 | A synthetic upload/read/download/version | Correct content and filename; clean up the test data |
 | Chat on a permitted test list | Streaming/history succeeds; unauthorized access is rejected |

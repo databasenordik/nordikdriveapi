@@ -204,9 +204,57 @@ worker core 96.1%. Linux race checks pass. The integrated Terraform module
 validates and passes 38 mock checks (8 original, 14 budget, 16 rollout).
 Workflow lint passes. NIA and unchanged outside consumers share the 25-slot
 instance; outside application quotas are not changed by this release. Outside applications are
-excluded from this release. A review-only bootstrap
-plan has 44 additions, zero updates/deletes and has not been applied. None of
-these results establishes cloud acceptance or milestone completion.
+excluded from this release. The reviewed bootstrap plan's 44 additions were
+applied to development on 2026-11-06, followed by the database IAM users and
+three migrations. Local results alone do not establish cloud acceptance.
+
+### Recorded development rollout
+
+The development gateway uses the existing nordikdriveapi service and URL;
+its Envoy and authorization containers share that instance. The business API
+and worker run separately in nordikdriveapi-legacy and nordikdriveapi-worker.
+The reviewed connection allocation is 17 of 20 slots. Local Terraform state
+and private backups remain in place; secret payloads are held in Secret Manager.
+
+The database backup completed before IAM authentication and migrations were
+applied. The gateway's public login/file/chat preflights passed with the actual
+frontend origin and credential support. Direct unauthenticated backend/worker
+requests were rejected. The user confirmed login, files and chat, including a
+new chat message after NIA's public invoker grant was removed. An anonymous
+NIA gRPC call was also rejected. The user subsequently confirmed the Support
+and Zoom test flow works. NIA uses two pools of one, with both instance
+maxima set to one. The old API/NIA revisions retired and honour-daily is paused.
+
+The Scheduler compatibility fix was deployed on 2026-11-09. Real deliveries used
+a short job ID while the worker required a qualified resource name. The worker
+now accepts either exact form, retaining registered-job and timestamp checks
+behind Cloud Run IAM. Short/full-name validation and persistent retry
+deduplication passed against an isolated PostgreSQL fixture.
+
+The live ledger records succeeded runs for file-review-email, form-review-email,
+file-normalization and file-reconciliation. Reconciliation was also invoked
+once through Scheduler as a non-notification verification. The cleanup job's
+scheduled execution succeeded. All seven new schedules are enabled; the old
+honour-daily stays paused. These are execution results, not proof that any
+particular notification reached a recipient.
+
+| Service | Serving revision |
+| --- | --- |
+| nordikdriveapi, gateway | nordikdriveapi-00338-c6s |
+| nordikdriveapi-legacy | nordikdriveapi-legacy-00001-vrg |
+| nordikdriveapi-worker | nordikdriveapi-worker-00003-pxc |
+| nordik-nia-api | nordik-nia-api-00034-tcq |
+
+The worker release image is
+us-west1-docker.pkg.dev/planar-ray-472112-e8/nordikdriveapi/nordik_drive_go@sha256:37f0d377a6eddec9eb9a4a766ff50998deabfc8cd5e931213269a7bf543288ca.
+The shared SQL allocation remains 17 of 20; its tier was not upgraded.
+
+The rejected-delivery interval began with the 2026-11-06 handover and ended with
+the 2026-11-09 worker fix. Recent retries recovered, but earlier missed daily
+slots have not been replayed. Post-fix daily-honour/support-maintenance executions
+are not yet recorded. Keep these limits explicit rather than treating the
+deployment as full acceptance. A final public request also produced a live
+gateway rate-limit counter, confirming the limiter's database write path.
 
 Verified on 2026-11-03; these are local/synthetic checks, not cloud acceptance.
 

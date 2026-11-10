@@ -30,27 +30,27 @@ func TestPostgresWorkerHTTPDispatchAndPersistentDeduplication(t *testing.T) {
 	}}}
 	router := gin.New()
 	jobs.RegisterWorker(router, runner, "projects/fixture/locations/local/jobs")
-	invoke := func(slot time.Time) *httptest.ResponseRecorder {
+	invoke := func(slot time.Time, identity string) *httptest.ResponseRecorder {
 		request := httptest.NewRequest("POST", "/internal/jobs/fixture/run", nil)
-		request.Header.Set("X-CloudScheduler-JobName", "projects/fixture/locations/local/jobs/fixture")
+		request.Header.Set("X-CloudScheduler-JobName", identity)
 		request.Header.Set("X-CloudScheduler-ScheduleTime", slot.Format(time.RFC3339))
 		response := httptest.NewRecorder()
 		router.ServeHTTP(response, request)
 		return response
 	}
 	slot := time.Now().UTC().Truncate(time.Minute)
-	first := invoke(slot)
-	second := invoke(slot)
+	first := invoke(slot, "projects/fixture/locations/local/jobs/fixture")
+	second := invoke(slot, "fixture")
 	if first.Code != 200 || second.Code != 200 || calls.Load() != 1 || !strings.Contains(second.Body.String(), `"duplicate":true`) {
 		t.Fatal("HTTP retry executed successful work twice")
 	}
 	fail = true
-	failed := invoke(slot.Add(-time.Minute))
+	failed := invoke(slot.Add(-time.Minute), "fixture")
 	if failed.Code != 503 || failed.Header().Get("Retry-After") == "" || strings.Contains(failed.Body.String(), "credential-canary") {
 		t.Fatal("worker failure is not safely retryable")
 	}
 	fail = false
-	if recovered := invoke(slot.Add(-time.Minute)); recovered.Code != 200 {
+	if recovered := invoke(slot.Add(-time.Minute), "fixture"); recovered.Code != 200 {
 		t.Fatal("failed delivery slot could not recover over HTTP")
 	}
 }

@@ -1,6 +1,18 @@
 [
   {
     "method": "POST",
+    "path": "/api/user/signup/otp/request",
+    "auth": "public",
+    "group": "auth"
+  },
+  {
+    "method": "POST",
+    "path": "/api/user/signup/otp/verify",
+    "auth": "public",
+    "group": "auth"
+  },
+  {
+    "method": "POST",
     "path": "/api/user/login",
     "auth": "public",
     "group": "auth"

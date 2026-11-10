@@ -1,10 +1,14 @@
 name: Stage one development runtime revision
 on:
+  workflow_call:
+    inputs:
+      target: {type: string, required: true}
+      image: {type: string, required: true}
   workflow_dispatch:
     inputs:
       target:
         type: choice
-        options: [monolith, worker, gateway-adapter]
+        options: [monolith, worker, gateway-adapter, notifications]
         required: true
       image:
         description: Immutable image URI ending in @sha256:digest
@@ -18,6 +22,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   deploy:
+    if: github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     environment: development
     env:
@@ -26,6 +31,7 @@ jobs:
       LEGACY_SERVICE: ${{ vars.LEGACY_CLOUD_RUN_SERVICE || 'nordikdriveapi-legacy' }}
       WORKER_SERVICE: ${{ vars.WORKER_CLOUD_RUN_SERVICE || 'nordikdriveapi-worker' }}
       GATEWAY_SERVICE: ${{ vars.GATEWAY_CLOUD_RUN_SERVICE || 'nordikdriveapi' }}
+      NOTIFICATIONS_SERVICE: ${{ vars.NOTIFICATIONS_CLOUD_RUN_SERVICE || 'nordikdriveapi-notifications' }}
     steps:
       - uses: actions/checkout@v4
       - id: auth
@@ -48,17 +54,32 @@ jobs:
             monolith)
               service="$LEGACY_SERVICE"
               [[ "$service" == nordikdriveapi-legacy ]]
+              [[ "$IMAGE" == */nordik_drive_go@sha256:* ]]
               ;;
             worker)
               service="$WORKER_SERVICE"
               [[ "$service" == nordikdriveapi-worker ]]
+              [[ "$IMAGE" == */nordik_worker_go@sha256:* ]]
+              ;;
+            notifications)
+              service="$NOTIFICATIONS_SERVICE"
+              [[ "$service" == nordikdriveapi-notifications ]]
+              [[ "$IMAGE" == */nordik_notifications_go@sha256:* ]]
               ;;
             gateway-adapter)
               service="$GATEWAY_SERVICE"
               [[ "$service" == nordikdriveapi-gateway || "$service" == nordikdriveapi ]]
+              [[ "$IMAGE" == */nordik_gateway_go@sha256:* ]]
               container=(--container authorization)
               ;;
             *) exit 1 ;;
           esac
           test -n "$service"
+          if [[ "$TARGET" == notifications ]]; then
+            existing=$(gcloud run services list --project planar-ray-472112-e8 --region us-west1 --filter="metadata.name=$service" --format='value(metadata.name)')
+            if [[ -z "$existing" ]]; then
+              echo "Notifications image published. Provision the reviewed Terraform resources before staging its first revision." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+          fi
           gcloud run services update "$service" --project planar-ray-472112-e8 --region us-west1 --image "$IMAGE" "${container[@]}" --no-traffic

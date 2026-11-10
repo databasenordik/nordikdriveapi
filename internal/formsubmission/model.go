@@ -53,7 +53,8 @@ type FormSubmission struct {
 	ReviewerComment string     `json:"reviewer_comment" gorm:"column:reviewer_comment;type:text;not null;default:''"`
 	ReviewedAt      *time.Time `json:"reviewed_at" gorm:"column:reviewed_at"`
 
-	ReviewEmailTriggerSuccess bool `json:"review_email_trigger_success" gorm:"column:review_email_trigger_success;not null;default:false"`
+	ReviewEmailTriggerSuccess bool   `json:"review_email_trigger_success" gorm:"column:review_email_trigger_success;not null;default:false"`
+	ReviewNotificationKey     string `json:"-" gorm:"not null;default:''"`
 
 	CreatedByUser  *FormSubmissionUserRef `json:"-" gorm:"foreignKey:CreatedByID;references:ID"`
 	EditedByUser   *FormSubmissionUserRef `json:"-" gorm:"foreignKey:EditedByID;references:ID"`

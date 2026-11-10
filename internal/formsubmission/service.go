@@ -18,6 +18,7 @@ import (
 
 	filehelper "nordik-drive-api/internal/file"
 	"nordik-drive-api/internal/mailer"
+	"nordik-drive-api/internal/outbox"
 	"nordik-drive-api/internal/requestscope"
 	"nordik-drive-api/internal/util"
 )
@@ -25,6 +26,7 @@ import (
 type FormSubmissionService struct {
 	DB     *gorm.DB
 	Mailer mailer.EmailSender
+	Outbox *outbox.Writer
 }
 
 var uploadBase64ToGCSHook = util.UploadPhotoToGCSContext
@@ -137,6 +139,9 @@ var openFormUploadReaderHook = func(ctx context.Context, rec FormSubmissionUploa
 }
 
 func (s *FormSubmissionService) triggerReviewEmailAsync(sub *FormSubmission) {
+	if s.Outbox != nil {
+		return
+	}
 	formSubmissionGoHook(func() {
 		defer func() {
 			if recover() != nil {
@@ -1031,13 +1036,16 @@ func (s *FormSubmissionService) ReviewSubmission(req *ReviewFormSubmissionReques
 			shouldTriggerEmail = true
 		}
 
+		if shouldTriggerEmail && s.Outbox != nil {
+			return s.enqueueReviewTx(tx, sub.ID, true)
+		}
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	if shouldTriggerEmail {
+	if shouldTriggerEmail && s.Outbox == nil && req.SubmissionReview != nil {
 		sub.Status = req.SubmissionReview.Status
 		sub.ReviewerComment = req.SubmissionReview.ReviewerComment
 		s.triggerReviewEmailAsync(&sub)

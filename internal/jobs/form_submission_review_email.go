@@ -9,6 +9,7 @@ import (
 
 	"nordik-drive-api/internal/formsubmission"
 	"nordik-drive-api/internal/mailer"
+	"nordik-drive-api/internal/outbox"
 	"nordik-drive-api/internal/requestscope"
 )
 
@@ -17,6 +18,8 @@ type FormSubmissionReviewEmailJob struct {
 	Mailer    mailer.EmailSender
 	Logger    *log.Logger
 	BatchSize int
+	Outbox    *outbox.Writer
+	Remote    outbox.Remote
 }
 
 type formSubmissionReviewEmailRow struct {
@@ -46,8 +49,16 @@ func NewFormSubmissionReviewEmailJob(
 func (j *FormSubmissionReviewEmailJob) Run() error {
 	var rows []formSubmissionReviewEmailRow
 
-	err := j.DB.
-		Model(&formsubmission.FormSubmission{}).
+	query := j.DB.Model(&formsubmission.FormSubmission{})
+	if j.Outbox != nil {
+		query = query.Where(`((COALESCE(form_submissions.review_notification_key, '') = '' AND form_submissions.status <> 'pending') OR EXISTS (
+		 SELECT 1 FROM notification_outbox n WHERE n.producer = 'records'
+		 AND n.event_key LIKE 'form-review:' || form_submissions.review_notification_key || ':%'
+		 AND n.state = 'provider_accepted')) AND form_submissions.review_email_trigger_success = ?`, false)
+	} else {
+		query = query.Where("form_submissions.status <> ? AND form_submissions.review_email_trigger_success = ?", "pending", false)
+	}
+	err := query.
 		Select(`
 			form_submissions.id,
 			form_submissions.form_label,
@@ -59,7 +70,6 @@ func (j *FormSubmissionReviewEmailJob) Run() error {
 			TRIM(COALESCE(u.firstname, '') || ' ' || COALESCE(u.lastname, '')) AS created_user_name
 		`).
 		Joins("JOIN users u ON u.id = form_submissions.created_by").
-		Where("form_submissions.status <> ? AND form_submissions.review_email_trigger_success = ?", "pending", false).
 		Order("form_submissions.created_at ASC").
 		Limit(j.BatchSize).
 		Scan(&rows).Error
@@ -68,6 +78,26 @@ func (j *FormSubmissionReviewEmailJob) Run() error {
 	}
 
 	for _, row := range rows {
+		if j.Outbox != nil {
+			owner := &formsubmission.FormSubmissionService{DB: j.DB, Outbox: j.Outbox}
+			key, err := owner.RecoverReviewIntent(row.ID)
+			if err != nil {
+				return err
+			}
+			if key == "" {
+				continue
+			}
+			accepted, err := outbox.ProviderAccepted(requestscope.Context(j.DB), j.DB, j.Remote, "form-review:"+key)
+			if err != nil {
+				return err
+			}
+			if accepted {
+				if err := j.DB.Table("form_submissions").Where("id = ? AND review_notification_key = ?", row.ID, key).Update("review_email_trigger_success", true).Error; err != nil {
+					return err
+				}
+			}
+			continue
+		}
 		if err := requestscope.Context(j.DB).Err(); err != nil {
 			return err
 		}

@@ -11,6 +11,7 @@ import (
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+	"nordik-drive-api/internal/outbox"
 )
 
 var (
@@ -33,6 +34,7 @@ type Service struct {
 	Clock                  func() time.Time
 	MeetingProvider        MeetingProvider
 	HRAvailabilityProvider HRAvailabilityProvider
+	Outbox                 *outbox.Writer
 }
 
 func (s *Service) now() time.Time {
@@ -607,7 +609,24 @@ func (s *Service) recordAudit(tx *gorm.DB, entityType string, entityID *uint, ac
 	if err != nil {
 		return err
 	}
-	return tx.Create(&SupportScheduleAuditLog{EntityType: entityType, EntityID: entityID, Action: action, ActorID: actorID, Details: encoded}).Error
+	record := SupportScheduleAuditLog{EntityType: entityType, EntityID: entityID, Action: action, ActorID: actorID, Details: encoded}
+	if s.Outbox != nil {
+		snapshot, err := s.notificationSnapshot(tx, entityType, entityID, action, encoded)
+		if err != nil {
+			return err
+		}
+		if snapshot != nil {
+			b, err := json.Marshal(snapshot)
+			if err != nil {
+				return err
+			}
+			record.NotificationState = "pending"
+			next := time.Now().UTC()
+			record.NotificationNextAttempt = &next
+			record.NotificationSnapshot = string(b)
+		}
+	}
+	return tx.Create(&record).Error
 }
 
 func (s *Service) RunScheduledMaintenance() error {

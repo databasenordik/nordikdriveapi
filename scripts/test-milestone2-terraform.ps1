@@ -48,7 +48,7 @@ try {
         Invoke-LocalTerraform -Arguments @("-chdir=$moduleDirectory", 'init', '-backend=false', '-input=false', '-lockfile=readonly', '-no-color')
     }
     Invoke-LocalTerraform -Arguments @("-chdir=$moduleDirectory", 'validate', '-no-color')
-    foreach ($suite in @('safety', 'small_database', 'rollout')) {
+    foreach ($suite in @('safety', 'small_database', 'rollout', 'notifications')) {
         $relativeFile = Join-Path 'tests' "$suite.tftest.hcl"
         $fullFile = Join-Path $moduleDirectory $relativeFile
         $expectedCount = ([regex]::Matches((Get-Content -LiteralPath $fullFile -Raw), '(?m)^run\s+"')).Count

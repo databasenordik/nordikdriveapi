@@ -1,6 +1,6 @@
 # Microservice Architecture Proposal
 
-**Status:** Step 1 baseline work is recorded in [the baseline guide](baseline.md). The [Milestone 2 implementation and manual provisioning package](milestone-2.md) adds gateway and runtime foundations. Cloud provisioning, production cutover and domain-service extraction remain pending.
+**Status:** Step 1 baseline work is recorded in [the baseline guide](baseline.md). [Milestone 2](milestone-2.md) provides the deployed development gateway and worker foundations. [Milestone 3 implementation](milestone-3-release.md) is prepared locally; its development rollout and production cutover remain pending.
 
 ## Goal and Scope
 
@@ -21,11 +21,11 @@ The migration is incremental: the gateway sends extracted routes to their owning
 - Preserve existing frontend behavior, public API contracts, login cookies, and application user IDs during extraction.
 - Extract Notifications first, after the gateway and shared foundations are ready.
 - Require owner APIs for all cross-service data access in the final architecture, including NIA retrieval. Cross-domain database functions and replicated read models are not exceptions.
-- Keep Python NIA in its existing repository and deployment. Plan companion NIA changes explicitly.
+- Keep NIA in its existing repository and deployment. Plan companion NIA changes explicitly; its current runtime source is TypeScript/Bun.
 - Defer Keycloak user login until a later phase that includes coordinated frontend changes. Do not use Keycloak as an additional service-token issuer during this migration.
 - Require at least 90% combined unit/integration statement coverage for each extracted service's handwritten runtime code, excluding generated bindings.
 
-## Current Architecture and Problems
+## Starting Architecture and Problems
 
 `cmd/server/main.go` starts one Gin application, connects feature modules to a shared GORM database, creates external clients, and starts an in-process scheduler. The current Dockerfile builds one server image, and the deployment workflow targets one Cloud Run service.
 
@@ -219,7 +219,7 @@ Each phase requires a reviewed implementation specification and validation evide
 
 1. **Establish the baseline.** Inventory routes, tables, joins, transaction boundaries, jobs, and external dependencies. Record every sensitive credential's issuer, owner, consumers, lifetime, renewal, and revocation mechanism. Align CI with Go 1.25, repair integration-test discovery, establish coverage collection, and address credential logging. Capture representative API behavior and performance. Track implementation and validation in [baseline.md](baseline.md).
 2. **Introduce the gateway and foundations.** Benchmark the Envoy/Go adapter and PostgreSQL limiter, including their impact on business database workloads. Preserve the public API address, place the monolith behind the gateway, and initially forward all application routes to it. Establish workload tokens, automatic Cloud SQL IAM authentication, Secret Manager ownership/IAM and version-pinned bootstrap configuration, contexts, telemetry, rate limiting, contract checks, and independent pipelines. Coordinate authenticated NIA invocation with its callers. Move cron triggers out of replica-local schedulers before parallel deployments can duplicate jobs.
-3. **Extract Notifications.** Introduce delivery commands, producer-owned outboxes, and durable dispatch. Move provider delivery and delivery state while keeping business decisions in their current domains. Verify notifications end to end before switching producers.
+3. **Extract Notifications.** Introduce delivery commands, producer-owned outboxes, and durable dispatch. Move provider delivery and delivery state while keeping business decisions in their current domains. Verify notifications end to end before switching producers. See the [Milestone 3 plan](milestone-3-plan.md), including signup email verification before account creation.
 4. **Extract Identity, then Audit.** Preserve login and application IDs. Replace user joins with batch APIs and move audit ingestion/query ownership. Retain existing profile enrichment and audit filtering through owner APIs.
 5. **Extract Support.** Move its complete workflow, tables, Zoom/provider integration, notification intents, and scheduled maintenance together.
 6. **Extract Records.** Move connected file/form/review workflows together. Replace remaining external database dependencies. Coordinate NIA's scoped Records API integration in its existing repository before revoking retrieval access.

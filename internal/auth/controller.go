@@ -30,6 +30,7 @@ func (ac *AuthController) SignUp(c *gin.Context) {
 		Email     string   `json:"email" binding:"required,email"`
 		Password  string   `json:"password" binding:"required,min=6"`
 		Community []string `json:"community"`
+		Proof     string   `json:"signup_verification_token"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -37,7 +38,19 @@ func (ac *AuthController) SignUp(c *gin.Context) {
 		return
 	}
 
-	password, err := hash(req.Password)
+	verified, hasVerification := ac.AuthService.(interface {
+		SignupVerificationRequired() bool
+		CreateVerifiedUser(Auth, string, string, any) (*Auth, error)
+	})
+	if hasVerification && verified.SignupVerificationRequired() && req.Proof == "" {
+		signupFailure(c, ErrSignupVerification)
+		return
+	}
+	password := req.Password
+	var err error
+	if !hasVerification || (!verified.SignupVerificationRequired() && req.Proof == "") {
+		password, err = hash(req.Password)
+	}
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -55,9 +68,18 @@ func (ac *AuthController) SignUp(c *gin.Context) {
 		user.Community = pq.StringArray(req.Community)
 	}
 
-	newuser, err := ac.AuthService.CreateUser(user)
+	var newuser *Auth
+	if hasVerification && (verified.SignupVerificationRequired() || req.Proof != "") {
+		newuser, err = verified.CreateVerifiedUser(user, req.Proof, c.GetHeader("Idempotency-Key"), req)
+	} else {
+		newuser, err = ac.AuthService.CreateUser(user)
+	}
 
 	if err != nil {
+		if hasVerification && (verified.SignupVerificationRequired() || req.Proof != "") {
+			signupFailure(c, err)
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

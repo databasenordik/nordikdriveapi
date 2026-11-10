@@ -60,6 +60,7 @@ type SupportRequest struct {
 	RequesterEmailSent     bool       `json:"requester_email_sent" gorm:"column:requester_email_sent;not null;default:false"`
 	StatusEmailSent        bool       `json:"status_email_sent" gorm:"column:status_email_sent;not null;default:false"`
 	TeamForwardEmailSent   bool       `json:"team_forward_email_sent" gorm:"column:team_forward_email_sent;not null;default:false"`
+	NotificationVersion    int64      `json:"-" gorm:"not null;default:0"`
 	CreatedAt              time.Time  `json:"created_at" gorm:"column:created_at;autoCreateTime"`
 	UpdatedAt              time.Time  `json:"updated_at" gorm:"column:updated_at;autoUpdateTime"`
 

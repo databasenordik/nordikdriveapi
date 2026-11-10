@@ -10,6 +10,7 @@ import (
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+	"nordik-drive-api/internal/requestscope"
 )
 
 var reservingCallStatuses = []string{
@@ -1193,6 +1194,17 @@ func (s *Service) today() string {
 }
 
 func (s *Service) notifyRequest(request *SupportCallRequest, event string, formerAssignees ...*SupportUser) {
+	if s.Outbox != nil {
+		if request != nil {
+			callID := uint(0)
+			if request.Call != nil {
+				callID = request.Call.ID
+			}
+			_ = s.DB.Model(&SupportScheduleAuditLog{}).Where("notification_state = ? AND ((entity_type = ? AND entity_id = ?) OR (entity_type = ? AND entity_id = ?))", "pending", "support_request", request.ID, "support_call", callID).Update("notification_next_attempt", time.Now().UTC()).Error
+		}
+		_ = s.RecoverNotifications(requestscope.Context(s.DB))
+		return
+	}
 	if s.Mailer == nil || request == nil {
 		return
 	}
@@ -1238,6 +1250,10 @@ func (s *Service) notifyRequest(request *SupportCallRequest, event string, forme
 }
 
 func (s *Service) notifyAssignmentChange(date, reason string) {
+	if s.Outbox != nil {
+		_ = s.RecoverNotifications(requestscope.Context(s.DB))
+		return
+	}
 	if s.Mailer == nil {
 		return
 	}

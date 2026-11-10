@@ -1,4 +1,4 @@
-"""Check new gateway/worker core coverage from a combined Go profile.
+"""Check new platform core coverage from a combined Go profile.
 
 Go can emit the same block once per test binary with -coverpkg=./.... Merge
 those observations before counting statements; never average package percents.
@@ -25,6 +25,7 @@ def main():
 
     groups = {
         "gateway library": lambda path: "/internal/gateway/" in path,
+        "notifications service": lambda path: "/internal/notifications/" in path,
         "new worker core": lambda path: any(
             path.endswith("/internal/jobs/" + name + ".go")
             for name in ("runner", "http", "registry")
@@ -43,7 +44,7 @@ def main():
         print(f"{name}: {percent:.1f}% ({covered}/{total} statements)")
         failed |= not total or covered * 100 < total * 90
     if failed:
-        raise SystemExit("new gateway/worker core requires 90% combined coverage")
+        raise SystemExit("each new platform core requires 90% combined coverage")
 
 
 if __name__ == "__main__":

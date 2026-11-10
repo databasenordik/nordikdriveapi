@@ -60,7 +60,7 @@ func TestServiceBoundariesAndCompatibility(t *testing.T) {
 		t.Fatal(err)
 	}
 	var routes []struct{ Method, Path string }
-	if json.Unmarshal(data, &routes) != nil || len(routes) != 95 {
+	if json.Unmarshal(data, &routes) != nil || len(routes) != 97 {
 		t.Fatal("public route fixture changed unexpectedly")
 	}
 	for _, route := range routes {
@@ -77,6 +77,32 @@ func TestServiceBoundariesAndCompatibility(t *testing.T) {
 	for _, path := range []string{"/internal/jobs/x/run", "/api/internal/jobs/honour/run", "/api/fileevil", "/api/file/../internal", "/api/file//x", "/api/file/\\x", "/api/file/\x00"} {
 		if _, ok := Match("GET", path); ok {
 			t.Errorf("admitted unowned path %q", path)
+		}
+	}
+}
+
+func TestSignupClientIPOverwritesBrowserHeader(t *testing.T) {
+	for _, method := range []string{"POST", "OPTIONS"} {
+		request := checkRequest(method, "/api/user/signup/otp/request", "")
+		request.Attributes.Request.Http.Headers["x-nordik-client-ip"] = "198.51.100.100"
+		response, err := NewAuthorizer(testConfig(), &fakeLimiter{decision: Decision{Allowed: true}}, nil).Check(context.Background(), request)
+		if err != nil || response.GetOkResponse() == nil {
+			t.Fatal("signup authorization failed", err)
+		}
+		found := false
+		for _, header := range response.GetOkResponse().Headers {
+			if header.Header.Key == "x-nordik-client-ip" {
+				found = true
+				if header.Header.Value != "192.0.2.10" {
+					t.Fatal("forged browser IP forwarded")
+				}
+			}
+		}
+		if method == "POST" && !found {
+			t.Fatal("trusted address missing")
+		}
+		if method == "OPTIONS" && !contains(response.GetOkResponse().HeadersToRemove, "x-nordik-client-ip") {
+			t.Fatal("preflight spoof header was not removed")
 		}
 	}
 }
@@ -168,7 +194,13 @@ func TestBackendIdentityIsSelectedByService(t *testing.T) {
 		req := checkRequest("GET", boundary.Prefix, cookie(t))
 		req.Attributes.Request.Http.Headers["x-serverless-authorization"] = "Bearer forged"
 		r, _ := a.Check(context.Background(), req)
-		if r.GetOkResponse() == nil || r.GetOkResponse().Headers[0].Header.Value != "Bearer "+boundary.Service+"-identity" {
+		selectedToken := ""
+		for _, item := range r.GetOkResponse().GetHeaders() {
+			if item.Header.Key == "x-serverless-authorization" {
+				selectedToken = item.Header.Value
+			}
+		}
+		if r.GetOkResponse() == nil || selectedToken != "Bearer "+boundary.Service+"-identity" {
 			t.Fatalf("wrong backend token for %s", boundary.Prefix)
 		}
 		if !contains(r.GetOkResponse().HeadersToRemove, "x-user-id") {

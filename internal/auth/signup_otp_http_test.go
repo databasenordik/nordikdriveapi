@@ -9,11 +9,14 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"nordik-drive-api/internal/mailer"
 )
 
 func TestSignupHTTPVerificationRequiredAndNoEarlyAccountOrCookies(t *testing.T) {
 	verifier, _ := signupFixture(t)
-	service := &AuthService{DB: verifier.DB, Outbox: verifier.Outbox, Signup: verifier, RequireVerified: true}
+	// Match Notifications-mode wiring: an absent SMTP pointer is held in the
+	// mailer interface while all email is produced through the outbox.
+	service := &AuthService{DB: verifier.DB, Outbox: verifier.Outbox, Signup: verifier, RequireVerified: true, Mailer: (*mailer.Service)(nil)}
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	RegisterSignupOTP(r, service)

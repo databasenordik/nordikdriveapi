@@ -10,6 +10,15 @@ import (
 	"time"
 )
 
+func TestAbsentSMTPClientCanBeRequestScoped(t *testing.T) {
+	// Notifications-mode callers can carry this typed nil in a mailer interface.
+	var service *Service
+	var contextual interface{ WithContext(context.Context) any } = service
+	if scoped := contextual.WithContext(context.Background()); scoped.(*Service) != nil {
+		t.Fatal("request scoping replaced the absent SMTP client")
+	}
+}
+
 func TestSMTPStopsOnCancellationAndRequiresTLS(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

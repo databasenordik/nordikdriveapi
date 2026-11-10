@@ -82,4 +82,5 @@ jobs:
               exit 0
             fi
           fi
-          gcloud run services update "$service" --project planar-ray-472112-e8 --region us-west1 --image "$IMAGE" "${container[@]}" --no-traffic
+          # Service flags precede --container; image belongs to that container.
+          gcloud run services update "$service" --project planar-ray-472112-e8 --region us-west1 --no-traffic "${container[@]}" --image "$IMAGE"

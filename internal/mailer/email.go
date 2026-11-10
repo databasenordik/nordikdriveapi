@@ -170,7 +170,14 @@ func (s *Service) SendWithAttachments(to []string, subject, body string, attachm
 	)
 }
 
-func (s *Service) WithContext(ctx context.Context) any { copy := *s; copy.ctx = ctx; return &copy }
+func (s *Service) WithContext(ctx context.Context) any {
+	if s == nil {
+		return (*Service)(nil)
+	}
+	copy := *s
+	copy.ctx = ctx
+	return &copy
+}
 
 // deliver keeps SMTP work within the request/job lifetime. Cancellation closes
 // the socket, including while net/smtp is waiting for a server response.

@@ -79,7 +79,7 @@ variable "runtime_secrets" {
   type    = map(map(object({ secret_id = string, version = string })))
   default = { gateway = {}, legacy = {}, worker = {} }
   validation {
-    condition     = alltrue([for owner, secrets in var.runtime_secrets : contains(["gateway", "legacy", "worker"], owner)]) && alltrue(flatten([for secrets in values(var.runtime_secrets) : [for secret in values(secrets) : can(regex("^[1-9][0-9]*$", secret.version))]]))
+    condition     = alltrue([for owner, secrets in var.runtime_secrets : contains(["gateway", "legacy", "worker", "notifications"], owner)]) && alltrue(flatten([for secrets in values(var.runtime_secrets) : [for secret in values(secrets) : can(regex("^[1-9][0-9]*$", secret.version))]]))
     error_message = "Use gateway/legacy/worker owners and numeric secret versions."
   }
 }
@@ -87,8 +87,8 @@ variable "runtime_settings" {
   type    = map(map(string))
   default = { legacy = {}, worker = {} }
   validation {
-    condition     = alltrue([for owner in keys(var.runtime_settings) : contains(["legacy", "worker"], owner)])
-    error_message = "runtime_settings supports legacy and worker only."
+    condition     = alltrue([for owner in keys(var.runtime_settings) : contains(["legacy", "worker", "notifications"], owner)])
+    error_message = "runtime_settings supports legacy, worker and notifications only."
   }
 }
 variable "rate_limit_mode" {

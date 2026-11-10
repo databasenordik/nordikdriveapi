@@ -8,6 +8,7 @@ import (
 )
 
 func RegisterRoutes(r *gin.Engine, as *AuthService, ls *logs.LogService) {
+	RegisterSignupOTP(r, as)
 	controller := &AuthController{AuthService: as, LS: ls}
 
 	userGroup := r.Group("/api/user")

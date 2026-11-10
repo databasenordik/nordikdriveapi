@@ -12,23 +12,46 @@ import (
 
 	"nordik-drive-api/config"
 	"nordik-drive-api/internal/mailer"
+	"nordik-drive-api/internal/notificationcontract"
+	"nordik-drive-api/internal/outbox"
 	"nordik-drive-api/internal/util"
 )
 
 type AuthService struct {
-	DB     *gorm.DB
-	CFG    *config.Config
-	Mailer mailer.EmailSender
+	DB              *gorm.DB
+	CFG             *config.Config
+	Mailer          mailer.EmailSender
+	Outbox          *outbox.Writer
+	Signup          *SignupVerifier
+	RequireVerified bool
 }
 
 var sendMail = smtp.SendMail
 
 func (s *AuthService) CreateUser(user Auth) (*Auth, error) {
+	if s.RequireVerified {
+		return nil, ErrSignupVerification
+	}
 	if user.Role == "" {
 		user.Role = "User"
 	}
 
-	if err := s.DB.Create(&user).Error; err != nil {
+	create := func(tx *gorm.DB) error {
+		if err := tx.Create(&user).Error; err != nil {
+			return err
+		}
+		if s.Outbox != nil {
+			return s.Outbox.Send(tx, "identity", fmt.Sprintf("signup-welcome:%d", user.ID), []string{user.Email}, "Your database access account has been created", BuildSignupEmailBody(user.FirstName, user.LastName, user.Email))
+		}
+		return nil
+	}
+	var createErr error
+	if s.Outbox != nil {
+		createErr = s.DB.Transaction(create)
+	} else {
+		createErr = create(s.DB)
+	}
+	if err := createErr; err != nil {
 		// check if it's a unique constraint violation
 		if strings.Contains(err.Error(), "duplicate key") || strings.Contains(err.Error(), "unique constraint") {
 			return nil, errors.New("An account with this email or phone number already exists. Please log in or use different details.")
@@ -36,7 +59,9 @@ func (s *AuthService) CreateUser(user Auth) (*Auth, error) {
 		return nil, err
 	}
 
-	s.triggerSignupEmail(&user)
+	if s.Outbox == nil {
+		s.triggerSignupEmail(&user)
+	}
 
 	return &user, nil
 }
@@ -144,6 +169,19 @@ func (s *AuthService) SendOTP(email string) (*Auth, string, error) {
 		Email: email,
 		Code:  otp,
 	}
+	if s.Outbox != nil {
+		err := s.DB.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Create(&record).Error; err != nil {
+				return err
+			}
+			_, err := s.Outbox.Put(tx, notificationcontract.Command{Producer: "identity", Key: fmt.Sprintf("password-reset:%d", record.ID), Kind: "otp", CreatedAt: record.CreatedAt, Deadline: record.CreatedAt.Add(10 * time.Minute)}, notificationcontract.Payload{To: user.Email, Subject: "OTP to change password", HTML: fmt.Sprintf("<p>Your password reset code is <strong>%s</strong>. It expires in 10 minutes.</p>", otp)})
+			return err
+		})
+		if err != nil {
+			return nil, "", err
+		}
+		return &user, otp, nil
+	}
 	if err := s.DB.Create(&record).Error; err != nil {
 		return nil, "", err
 	}
@@ -188,6 +226,15 @@ func (s *AuthService) ResetPassword(email, code, newPassword string) (*Auth, err
 	hashed, err := util.HashPassword(newPassword)
 	if err != nil {
 		return nil, err
+	}
+	if s.Outbox != nil {
+		err := s.DB.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Model(&Auth{}).Where("email = ?", email).Update("password", hashed).Error; err != nil {
+				return err
+			}
+			return s.Outbox.Send(tx, "identity", fmt.Sprintf("password-changed:%d:%d", user.ID, time.Now().UnixNano()), []string{user.Email}, "Your password has been changed", BuildPasswordChangedEmailBody(user.FirstName, user.LastName))
+		})
+		return &user, err
 	}
 	if err := s.DB.Model(&Auth{}).Where("email = ?", email).
 		Update("password", hashed).Error; err != nil {

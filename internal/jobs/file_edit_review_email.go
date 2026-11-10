@@ -9,6 +9,7 @@ import (
 
 	filehelper "nordik-drive-api/internal/file"
 	"nordik-drive-api/internal/mailer"
+	"nordik-drive-api/internal/outbox"
 	"nordik-drive-api/internal/requestscope"
 )
 
@@ -17,6 +18,8 @@ type FileEditReviewEmailJob struct {
 	Mailer    mailer.EmailSender
 	Logger    *log.Logger
 	BatchSize int
+	Outbox    *outbox.Writer
+	Remote    outbox.Remote
 }
 
 type fileEditReviewEmailRow struct {
@@ -46,8 +49,18 @@ func NewFileEditReviewEmailJob(
 func (j *FileEditReviewEmailJob) Run() error {
 	var rows []fileEditReviewEmailRow
 
-	err := j.DB.
-		Table("file_edit_request fer").
+	query := j.DB.Table("file_edit_request fer")
+	if j.Outbox != nil {
+		// Do not let old queued/failed deliveries occupy every scan slot.
+		// The dispatcher reconciles replay outcomes into the producer outbox.
+		query = query.Where(`((COALESCE(fer.review_notification_key, '') = '' AND fer.status <> 'pending') OR EXISTS (
+		 SELECT 1 FROM notification_outbox n WHERE n.producer = 'records'
+		 AND n.event_key LIKE 'file-review:' || fer.review_notification_key || ':%'
+		 AND n.state = 'provider_accepted')) AND fer.review_email_trigger_success = ?`, false)
+	} else {
+		query = query.Where("fer.status <> ? AND fer.review_email_trigger_success = ?", "pending", false)
+	}
+	err := query.
 		Select(`
 			fer.request_id,
 			fer.user_id,
@@ -59,7 +72,6 @@ func (j *FileEditReviewEmailJob) Run() error {
 			TRIM(COALESCE(u.firstname, '') || ' ' || COALESCE(u.lastname, '')) AS created_user_name
 		`).
 		Joins("JOIN users u ON u.id = fer.user_id").
-		Where("fer.status <> ? AND fer.review_email_trigger_success = ?", "pending", false).
 		Order("fer.created_at ASC").
 		Limit(j.BatchSize).
 		Scan(&rows).Error
@@ -68,6 +80,26 @@ func (j *FileEditReviewEmailJob) Run() error {
 	}
 
 	for _, row := range rows {
+		if j.Outbox != nil {
+			owner := &filehelper.FileService{DB: j.DB, Outbox: j.Outbox}
+			key, err := owner.RecoverReviewIntent(row.RequestID)
+			if err != nil {
+				return err
+			}
+			if key == "" {
+				continue
+			}
+			accepted, err := outbox.ProviderAccepted(requestscope.Context(j.DB), j.DB, j.Remote, "file-review:"+key)
+			if err != nil {
+				return err
+			}
+			if accepted {
+				if err := j.DB.Table("file_edit_request").Where("request_id = ? AND review_notification_key = ?", row.RequestID, key).Update("review_email_trigger_success", true).Error; err != nil {
+					return err
+				}
+			}
+			continue
+		}
 		if err := requestscope.Context(j.DB).Err(); err != nil {
 			return err
 		}

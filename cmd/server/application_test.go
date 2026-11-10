@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -47,6 +48,26 @@ func TestRealApplicationRetainsRouteInventory(t *testing.T) {
 	app.Router.ServeHTTP(response, request)
 	if response.Code != 200 || response.Header().Get("X-Request-ID") == "" {
 		t.Fatal("health/correlation unavailable")
+	}
+}
+
+func TestSignupPreflightAllowsIdempotencyHeader(t *testing.T) {
+	t.Setenv("CHAT_USE_NIA", "false")
+	app, err := newApplication(config.Config{}, &runtimeDependencies{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Close()
+	for _, path := range []string{"/api/user/signup/otp/request", "/api/user/signup/otp/verify", "/api/user/signup"} {
+		r := httptest.NewRequest("OPTIONS", path, nil)
+		r.Header.Set("Origin", "https://nordik-drive-react-724838782318.us-west1.run.app")
+		r.Header.Set("Access-Control-Request-Method", "POST")
+		r.Header.Set("Access-Control-Request-Headers", "content-type,idempotency-key")
+		w := httptest.NewRecorder()
+		app.Router.ServeHTTP(w, r)
+		if w.Code != 204 || w.Header().Get("Access-Control-Allow-Origin") != r.Header.Get("Origin") || !strings.Contains(strings.ToLower(w.Header().Get("Access-Control-Allow-Headers")), "idempotency-key") {
+			t.Fatal("signup preflight blocked", path, w.Code, w.Header())
+		}
 	}
 }
 

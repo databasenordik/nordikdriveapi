@@ -27,6 +27,7 @@ import (
 	"nordik-drive-api/internal/auth"
 	"nordik-drive-api/internal/honour"
 	"nordik-drive-api/internal/mailer"
+	"nordik-drive-api/internal/outbox"
 	"nordik-drive-api/internal/requestscope"
 	"nordik-drive-api/internal/util"
 )
@@ -34,6 +35,7 @@ import (
 type FileService struct {
 	DB     *gorm.DB
 	Mailer mailer.EmailSender
+	Outbox *outbox.Writer
 }
 
 type fileVersionHistoryQueryRow struct {
@@ -1690,6 +1692,9 @@ var triggerFormSubmissionReviewEmailHook = func(
 }
 
 func (fs *FileService) triggerReviewEmailAsync(fileedit *FileEditRequest) {
+	if fs.Outbox != nil {
+		return
+	}
 	formSubmissionGoHook(func() {
 		defer func() {
 			if recover() != nil {
@@ -1954,7 +1959,10 @@ func (fs *FileService) ReviewEditRequest(
 		req.ReviewComment = reviewComment
 		req.ReviewedBy = &reviewedByID
 		reviewedRequest = &req
-
+		if fs.Outbox != nil {
+			req.ReviewNotificationKey = ""
+			return fs.enqueueReviewTx(tx, &req)
+		}
 		return nil
 	}); err != nil {
 		return err
@@ -2011,6 +2019,10 @@ func (fs *FileService) ReviewAchieverStoryRequest(
 		req.ReviewComment = reviewComment
 		req.ReviewedBy = &reviewedByID
 		reviewedRequest = &req
+		if fs.Outbox != nil {
+			req.ReviewNotificationKey = ""
+			return fs.enqueueReviewTx(tx, &req)
+		}
 		return nil
 	}); err != nil {
 		return err

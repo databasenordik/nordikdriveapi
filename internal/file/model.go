@@ -113,6 +113,7 @@ type FileEditRequest struct {
 	Community                 pq.StringArray `gorm:"type:text[];column:community;default:'{}'" json:"community"`
 	UploaderCommunity         pq.StringArray `gorm:"type:text[];column:uploader_community;default:'{}'" json:"uploader_community"`
 	ReviewEmailTriggerSuccess bool           `gorm:"column:review_email_trigger_success;not null;default:false" json:"review_email_trigger_success"`
+	ReviewNotificationKey     string         `json:"-" gorm:"not null;default:''"`
 }
 
 type FileEditRequestDetails struct {

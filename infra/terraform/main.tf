@@ -7,20 +7,22 @@ locals {
     var.deployment_stage == "cutover" && var.public_gateway_service_name != null ? { public = var.public_gateway_service_name } : {},
   ) : {}
   gateway_deployment_count = length(local.gateway_deployments)
-  roles                    = toset(["gateway", "legacy", "worker", "scheduler", "migrations"])
+  roles                    = setunion(toset(["gateway", "legacy", "worker", "scheduler", "migrations"]), var.enable_notifications ? toset(["notifications", "tasks"]) : toset([]))
+  sql_owners               = setunion(toset(["gateway", "legacy", "worker", "migrations"]), var.enable_notifications ? toset(["notifications"]) : toset([]))
+  runtime_owners           = setunion(toset(["gateway", "legacy", "worker"]), var.enable_notifications ? toset(["notifications"]) : toset([]))
   pools = {
     gateway = var.db_pool_limits.gateway
     legacy  = var.db_pool_limits.legacy
     worker  = var.db_pool_limits.worker
   }
-  runtime_connections   = sum([for owner, pool in local.pools : pool * var.max_instances[owner] * (owner == "gateway" ? local.gateway_deployment_count : 1)])
-  rollout_connections   = sum([for owner, pool in local.pools : pool * var.rollout_extra_instances[owner] * (owner == "gateway" ? local.gateway_deployment_count : 1)])
+  runtime_connections   = sum([for owner, pool in local.pools : pool * var.max_instances[owner] * (owner == "gateway" ? local.gateway_deployment_count : 1)]) + local.notification_connections
+  rollout_connections   = sum([for owner, pool in local.pools : pool * var.rollout_extra_instances[owner] * (owner == "gateway" ? local.gateway_deployment_count : 1)]) + local.notification_connections
   allocated_connections = local.runtime_connections + local.rollout_connections + var.db_pool_limits.cleanup + var.other_reserved_connections
   connection_budget_limit = min(
     floor(var.database_connection_capacity * 0.8),
     var.database_connection_capacity - var.database_superuser_reserved_connections,
   )
-  secrets = {
+  secrets = merge({
 
     gateway = merge(lookup(var.runtime_secrets, "gateway", {}), {
       JWT_SECRET = var.jwt_secret
@@ -29,8 +31,7 @@ locals {
       JWT_SECRET = var.jwt_secret
     })
     worker = lookup(var.runtime_secrets, "worker", {})
-
-  }
+  }, var.enable_notifications ? { notifications = lookup(var.runtime_secrets, "notifications", {}) } : {})
   secret_pairs = {
     for item in flatten([for owner, secrets in local.secrets : [for env, secret in secrets : merge(secret, {
       owner = owner, env = env
@@ -135,7 +136,7 @@ resource "terraform_data" "safeguards" {
 
 resource "google_project_service" "apis" {
 
-  for_each           = toset(["run.googleapis.com", "sqladmin.googleapis.com", "secretmanager.googleapis.com", "cloudscheduler.googleapis.com", "iamcredentials.googleapis.com", "cloudtrace.googleapis.com", "monitoring.googleapis.com"])
+  for_each           = setunion(toset(["run.googleapis.com", "sqladmin.googleapis.com", "secretmanager.googleapis.com", "cloudscheduler.googleapis.com", "iamcredentials.googleapis.com", "cloudtrace.googleapis.com", "monitoring.googleapis.com"]), var.enable_notifications ? toset(["cloudtasks.googleapis.com"]) : toset([]))
   service            = each.key
   disable_on_destroy = false
 
@@ -150,7 +151,7 @@ resource "google_service_account" "runtime" {
 resource "google_project_iam_member" "sql" {
 
   for_each = {
-    for item in setproduct(["gateway", "legacy", "worker", "migrations"], ["roles/cloudsql.client", "roles/cloudsql.instanceUser"]) : "${item[0]}:${item[1]}" => item
+    for item in setproduct(local.sql_owners, ["roles/cloudsql.client", "roles/cloudsql.instanceUser"]) : "${item[0]}:${item[1]}" => item
   }
   project = var.project_id
   role    = each.value[1]
@@ -159,7 +160,7 @@ resource "google_project_iam_member" "sql" {
 }
 resource "google_sql_user" "iam" {
 
-  for_each   = local.database_enabled ? toset(["gateway", "legacy", "worker", "migrations"]) : toset([])
+  for_each   = local.database_enabled ? local.sql_owners : toset([])
   name       = trimsuffix(google_service_account.runtime[each.key].email, ".gserviceaccount.com")
   instance   = var.sql_instance_name
   type       = "CLOUD_IAM_SERVICE_ACCOUNT"
@@ -170,7 +171,7 @@ resource "google_sql_user" "iam" {
 resource "google_project_iam_member" "telemetry" {
 
   for_each = {
-    for item in setproduct(["gateway", "legacy", "worker"], ["roles/cloudtrace.agent", "roles/monitoring.metricWriter"]) : "${item[0]}:${item[1]}" => item
+    for item in setproduct(local.runtime_owners, ["roles/cloudtrace.agent", "roles/monitoring.metricWriter"]) : "${item[0]}:${item[1]}" => item
   }
   project = var.project_id
   role    = each.value[1]
@@ -270,7 +271,7 @@ resource "google_cloud_run_v2_service" "backend" {
       }
       dynamic "env" {
 
-        for_each = merge(lookup(var.runtime_settings, each.key, {}), local.common_env, {
+        for_each = merge(lookup(var.runtime_settings, each.key, {}), local.common_env, local.notification_producer_env, var.enable_notifications ? { SIGNUP_REQUIRE_VERIFIED_EMAIL = tostring(each.key == "legacy" && var.signup_require_verified_email) } : {}, {
 
           APP_ROLE                  = each.key == "worker" ? "worker" : "monolith"
           SCHEDULER_MODE            = "external"
@@ -546,7 +547,7 @@ resource "google_cloud_run_v2_service_iam_member" "nia" {
 }
 resource "google_service_account_iam_member" "deployer" {
 
-  for_each           = var.deployer_service_account == null ? toset([]) : toset(["gateway", "legacy", "worker"])
+  for_each           = var.deployer_service_account == null ? toset([]) : local.runtime_owners
   service_account_id = google_service_account.runtime[each.key].name
   role               = "roles/iam.serviceAccountUser"
   member             = "serviceAccount:${var.deployer_service_account}"

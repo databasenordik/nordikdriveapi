@@ -18,9 +18,16 @@ func UploadPhotoToGCS(base64Data, bucketName, objectName string) (string, int64,
 }
 
 func UploadPhotoToGCSContext(ctx context.Context, base64Data, bucketName, objectName string) (string, int64, error) {
+	location, size, _, err := UploadPhotoToGCSVersionedContext(ctx, base64Data, bucketName, objectName)
+	return location, size, err
+}
+
+// UploadPhotoToGCSVersionedContext returns the generation acknowledged by GCS,
+// allowing downstream delivery to read exactly the uploaded attachment.
+func UploadPhotoToGCSVersionedContext(ctx context.Context, base64Data, bucketName, objectName string) (string, int64, int64, error) {
 	client, err := storage.NewClient(ctx)
 	if err != nil {
-		return "", 0, err
+		return "", 0, 0, err
 	}
 	defer client.Close()
 
@@ -31,7 +38,7 @@ func UploadPhotoToGCSContext(ctx context.Context, base64Data, bucketName, object
 
 	data, err := base64.StdEncoding.DecodeString(base64Data)
 	if err != nil {
-		return "", 0, err
+		return "", 0, 0, err
 	}
 
 	w := client.Bucket(bucketName).Object(objectName).NewWriter(ctx)
@@ -40,17 +47,17 @@ func UploadPhotoToGCSContext(ctx context.Context, base64Data, bucketName, object
 	sizeBytes, err := w.Write(data)
 	if err != nil {
 		_ = w.CloseWithError(err)
-		return "", 0, err
+		return "", 0, 0, err
 	}
 
 	if err := w.Close(); err != nil {
-		return "", 0, err
+		return "", 0, 0, err
 	}
 
 	// Return gs:// URL
 	url := fmt.Sprintf("gs://%s/%s", bucketName, objectName)
 
-	return url, int64(sizeBytes), nil
+	return url, int64(sizeBytes), w.Attrs().Generation, nil
 }
 
 func splitBase64DataURL(value string) (payload string, contentType string) {

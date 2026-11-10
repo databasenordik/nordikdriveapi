@@ -188,24 +188,27 @@ type SupportCall struct {
 func (SupportCall) TableName() string { return "support_calls" }
 
 type SupportScheduleAuditLog struct {
-	ID         uint           `gorm:"primaryKey" json:"id"`
-	EntityType string         `gorm:"type:varchar(40);not null;index" json:"entity_type"`
-	EntityID   *uint          `gorm:"index" json:"entity_id,omitempty"`
-	Action     string         `gorm:"type:varchar(80);not null" json:"action"`
-	ActorID    *uint          `gorm:"index" json:"actor_id,omitempty"`
-	Details    datatypes.JSON `gorm:"type:jsonb;not null" json:"details"`
-	CreatedAt  time.Time      `json:"created_at"`
+	NotificationState       string         `json:"-" gorm:"not null;default:'ignored'"`
+	NotificationNextAttempt *time.Time     `json:"-"`
+	NotificationSnapshot    string         `json:"-" gorm:"type:text;not null;default:''"`
+	ID                      uint           `gorm:"primaryKey" json:"id"`
+	EntityType              string         `gorm:"type:varchar(40);not null;index" json:"entity_type"`
+	EntityID                *uint          `gorm:"index" json:"entity_id,omitempty"`
+	Action                  string         `gorm:"type:varchar(80);not null" json:"action"`
+	ActorID                 *uint          `gorm:"index" json:"actor_id,omitempty"`
+	Details                 datatypes.JSON `gorm:"type:jsonb;not null" json:"details"`
+	CreatedAt               time.Time      `json:"created_at"`
 }
 
 func (SupportScheduleAuditLog) TableName() string { return "support_schedule_audit_logs" }
 
 type SettingsResponse struct {
-	TimeZone              string `json:"time_zone"`
-	WorkdayStart          string `json:"workday_start"`
-	WorkdayEnd            string `json:"workday_end"`
-	AllowedDurations      []int  `json:"allowed_durations"`
-	DefaultDurationMinute int    `json:"default_duration_minutes"`
-	BookingHorizonDays    int    `json:"booking_horizon_days"`
+	TimeZone              string   `json:"time_zone"`
+	WorkdayStart          string   `json:"workday_start"`
+	WorkdayEnd            string   `json:"workday_end"`
+	AllowedDurations      []int    `json:"allowed_durations"`
+	DefaultDurationMinute int      `json:"default_duration_minutes"`
+	BookingHorizonDays    int      `json:"booking_horizon_days"`
 	CallReasons           []string `json:"call_reasons"`
 }
 

@@ -16,6 +16,8 @@ import (
 	"gorm.io/gorm"
 
 	"nordik-drive-api/internal/mailer"
+	"nordik-drive-api/internal/notificationcontract"
+	"nordik-drive-api/internal/outbox"
 	"nordik-drive-api/internal/requestscope"
 	"nordik-drive-api/internal/util"
 )
@@ -29,6 +31,7 @@ type SupportRequestService struct {
 	DB                     *gorm.DB
 	Mailer                 SupportRequestMailer
 	NotificationRecipients []string
+	Outbox                 *outbox.Writer
 }
 
 type preparedScreenshot struct {
@@ -37,6 +40,7 @@ type preparedScreenshot struct {
 	FileSizeBytes int64
 	FileURL       string
 	Attachment    mailer.Attachment
+	Reference     *notificationcontract.Attachment
 }
 
 var ErrInvalidSupportRequest = errors.New("invalid support request")
@@ -49,6 +53,7 @@ const (
 )
 
 var uploadSupportRequestScreenshotHook = util.UploadPhotoToGCSContext
+var uploadVersionedSupportRequestScreenshotHook = util.UploadPhotoToGCSVersionedContext
 var supportRequestGoHook = func(fn func()) {
 	fn()
 }
@@ -211,6 +216,17 @@ func (s *SupportRequestService) Create(
 		record.ScreenshotURL = prepared.FileURL
 	}
 
+	if s.Outbox != nil {
+		if err := s.DB.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Create(&record).Error; err != nil {
+				return err
+			}
+			return s.enqueueInitialTx(tx, &record, prepared)
+		}); err != nil {
+			return nil, err
+		}
+		return &CreateSupportRequestResponse{ID: record.ID, Message: "Support request received successfully."}, nil
+	}
 	if err := s.DB.Create(&record).Error; err != nil {
 		return nil, err
 	}
@@ -275,11 +291,17 @@ func (s *SupportRequestService) prepareScreenshotUpload(
 
 	displayFilename, objectPath := buildScreenshotFileNames(fileHeader.Filename, contentType, userID, now)
 	base64Body := base64.StdEncoding.EncodeToString(data)
-	fileURL, sizeBytes, err := uploadSupportRequestScreenshotHook(requestscope.Context(s.DB),
-		fmt.Sprintf("data:%s;base64,%s", contentType, base64Body),
-		"nordik-drive-photos",
-		objectPath,
-	)
+	var fileURL string
+	var sizeBytes, generation int64
+	if s.Outbox != nil {
+		fileURL, sizeBytes, generation, err = uploadVersionedSupportRequestScreenshotHook(requestscope.Context(s.DB), fmt.Sprintf("data:%s;base64,%s", contentType, base64Body), "nordik-drive-photos", objectPath)
+	} else {
+		fileURL, sizeBytes, err = uploadSupportRequestScreenshotHook(requestscope.Context(s.DB),
+			fmt.Sprintf("data:%s;base64,%s", contentType, base64Body),
+			"nordik-drive-photos",
+			objectPath,
+		)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to upload screenshot: %w", err)
 	}
@@ -288,7 +310,7 @@ func (s *SupportRequestService) prepareScreenshotUpload(
 		sizeBytes = int64(len(data))
 	}
 
-	return &preparedScreenshot{
+	prepared := &preparedScreenshot{
 		FileName:      displayFilename,
 		MimeType:      contentType,
 		FileSizeBytes: sizeBytes,
@@ -298,7 +320,15 @@ func (s *SupportRequestService) prepareScreenshotUpload(
 			ContentType: contentType,
 			Data:        data,
 		},
-	}, nil
+	}
+	if s.Outbox != nil {
+		reference, err := screenshotReference(objectPath, generation, prepared)
+		if err != nil {
+			return nil, err
+		}
+		prepared.Reference = &reference
+	}
+	return prepared, nil
 }
 
 func (s *SupportRequestService) triggerInitialNotificationsAsync(
@@ -477,6 +507,20 @@ func (s *SupportRequestService) Update(
 		record.ClosedAt = nil
 	}
 
+	if s.Outbox != nil {
+		record.NotificationVersion = now.UnixNano()
+		record.StatusEmailSent = false
+		if status == RequestStatusInProgress {
+			record.TeamForwardEmailSent = false
+		}
+		err := s.DB.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Save(&record).Error; err != nil {
+				return err
+			}
+			return s.enqueueManagementTx(tx, &record, teamRecipients, status == RequestStatusInProgress)
+		})
+		return &record, err
+	}
 	if err := s.DB.Save(&record).Error; err != nil {
 		return nil, err
 	}

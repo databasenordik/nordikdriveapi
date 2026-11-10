@@ -194,7 +194,7 @@ func (s *Service) deliver(addr string, auth smtp.Auth, from string, to []string,
 	}
 	conn, err := (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, "tcp", addr)
 	if err != nil {
-		return errors.New("SMTP connection failed")
+		return &DeliveryError{Message: "SMTP connection failed", SafeToRetry: true}
 	}
 	defer conn.Close()
 	if deadline, ok := ctx.Deadline(); ok {
@@ -204,35 +204,35 @@ func (s *Service) deliver(addr string, auth smtp.Auth, from string, to []string,
 	defer stop()
 	client, err := smtp.NewClient(conn, s.SMTPHost)
 	if err != nil {
-		return errors.New("SMTP handshake failed")
+		return &DeliveryError{Message: "SMTP handshake failed", SafeToRetry: true}
 	}
 	defer client.Close()
 	if ok, _ := client.Extension("STARTTLS"); !ok {
-		return errors.New("SMTP server must support STARTTLS")
+		return &DeliveryError{Message: "SMTP server must support STARTTLS", Permanent: true}
 	}
 	if err := client.StartTLS(&tls.Config{ServerName: s.SMTPHost, MinVersion: tls.VersionTLS12}); err != nil {
-		return errors.New("SMTP TLS failed")
+		return &DeliveryError{Message: "SMTP TLS failed", SafeToRetry: true}
 	}
 	if err := client.Auth(auth); err != nil {
-		return errors.New("SMTP authentication failed")
+		return &DeliveryError{Message: "SMTP authentication failed", SafeToRetry: true}
 	}
 	if err := client.Mail(from); err != nil {
-		return errors.New("SMTP sender rejected")
+		return smtpRejection("SMTP sender rejected", err)
 	}
 	for _, recipient := range to {
 		if err := client.Rcpt(recipient); err != nil {
-			return errors.New("SMTP recipient rejected")
+			return smtpRejection("SMTP recipient rejected", err)
 		}
 	}
 	writer, err := client.Data()
 	if err != nil {
-		return errors.New("SMTP data rejected")
+		return smtpRejection("SMTP data rejected", err)
 	}
 	if _, err := writer.Write(message); err != nil {
-		return errors.New("SMTP write failed")
+		return &DeliveryError{Message: "SMTP write failed"}
 	}
 	if err := writer.Close(); err != nil {
-		return errors.New("SMTP delivery outcome uncertain")
+		return &DeliveryError{Message: "SMTP delivery outcome uncertain"}
 	}
 	_ = client.Quit()
 	return nil
@@ -241,6 +241,12 @@ func (s *Service) deliver(addr string, auth smtp.Auth, from string, to []string,
 type base64LineWriter struct {
 	io.Writer
 	lineLength int
+}
+
+func smtpRejection(message string, err error) error {
+	var reply *textproto.Error
+	permanent := errors.As(err, &reply) && reply.Code >= 500 && reply.Code < 600
+	return &DeliveryError{Message: message, SafeToRetry: !permanent, Permanent: permanent}
 }
 
 func (w *base64LineWriter) Write(p []byte) (int, error) {

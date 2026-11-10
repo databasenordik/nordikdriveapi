@@ -58,6 +58,7 @@ func (a *Authorizer) Check(ctx context.Context, req *authv3.CheckRequest) (*auth
 	preflight := h.GetMethod() == http.MethodOptions
 	headers := h.GetHeaders()
 	policy, subject, limit := "public", "", a.Config.PublicLimit
+	clientIP := ""
 	if !preflight {
 		request := http.Request{Header: http.Header{"Cookie": []string{headers["cookie"]}}}
 		cookie, e := request.Cookie("access_token")
@@ -85,6 +86,7 @@ func (a *Authorizer) Check(ctx context.Context, req *authv3.CheckRequest) (*auth
 			return denyRequest(req, 400, "client address unavailable", "INVALID_CLIENT_ADDRESS", 0), nil
 		}
 		if subject == "" || route.Group == "auth" {
+			clientIP = ip
 			subject = ip
 			if route.Group == "auth" {
 				policy, limit = "auth", a.Config.AuthLimit
@@ -116,6 +118,14 @@ func (a *Authorizer) Check(ctx context.Context, req *authv3.CheckRequest) (*auth
 		}
 	}
 	response := &authv3.OkHttpResponse{HeadersToRemove: []string{"x-user-id", "x-nordik-user-id", "x-workload-token", "x-operator-authorization", "x-serverless-authorization", "x-honour-job-secret", "x-envoy-internal", "x-envoy-original-path", "x-envoy-retry-on", "x-envoy-retry-grpc-on", "x-envoy-max-retries", "x-envoy-upstream-rq-timeout-ms", "x-envoy-upstream-rq-per-try-timeout-ms", "x-envoy-hedge-on-per-try-timeout", "x-envoy-retriable-status-codes", "x-envoy-upstream-rq-timeout-alt-response", "x-forwarded-client-cert", "x-goog-authenticated-user-email", "x-goog-authenticated-user-id"}}
+	if !preflight && clientIP == "" {
+		clientIP, _ = a.clientIP(h.GetHeaders(), req.GetAttributes().GetSource().GetAddress().GetSocketAddress().GetAddress())
+	}
+	if clientIP != "" {
+		response.Headers = append(response.Headers, header("x-nordik-client-ip", clientIP))
+	} else {
+		response.HeadersToRemove = append(response.HeadersToRemove, "x-nordik-client-ip")
+	}
 	if !a.Config.Local {
 		if a.Tokens[route.Service] == nil {
 			return denyRequest(req, 503, "Backend identity unavailable", "WORKLOAD_UNAVAILABLE", 1), nil

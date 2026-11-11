@@ -283,7 +283,15 @@ func (s *SignupVerifier) Request(ctx context.Context, email, ip, key string) (Si
 		id, err := s.Outbox.Put(tx, notificationcontract.Command{Producer: "identity", Key: "signup-otp:" + challenge.ID, Kind: "otp", CreatedAt: now, Deadline: challenge.ExpiresAt, Supersession: keyed(s.Keys[s.Active], "signup-supersession", email), Sequence: now.UnixMicro()}, notificationcontract.Payload{To: email, Subject: "Verify your Nordik Drive email", HTML: fmt.Sprintf("<p>Your signup verification code is <strong>%s</strong>.</p><p>It expires in 10 minutes. Use the latest code you requested.</p>", code)})
 		return SignupResult{ChallengeID: challenge.ID, ExpiresAt: challenge.ExpiresAt, ResendAfter: challenge.ResendAfter, OutboxID: id}, err
 	})
-	if err == nil && result.OutboxID != "" && s.Remote != nil {
+	if err == nil && result.ChallengeID != "" && s.Outbox.Publisher != nil {
+		// Idempotent request replays may not execute Put again. Re-register the
+		// existing intent so a failed task publication can be retried safely.
+		var record outbox.Record
+		if findErr := s.DB.WithContext(ctx).Select("id").Where("producer = ? AND event_key = ?", "identity", "signup-otp:"+result.ChallengeID).First(&record).Error; findErr == nil {
+			outbox.Track(ctx, record.ID)
+		}
+	}
+	if err == nil && result.OutboxID != "" && s.Remote != nil && s.Outbox.Publisher == nil {
 		s.fastDispatch(ctx, result.OutboxID)
 	}
 	return result, err

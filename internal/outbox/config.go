@@ -11,6 +11,13 @@ import (
 
 func Configure(ctx context.Context) (*Writer, *notificationcontract.Client, error) {
 	mode := os.Getenv("NOTIFICATION_DELIVERY_MODE")
+	enabled, err := EventDispatchEnabled()
+	if err != nil {
+		return nil, nil, err
+	}
+	if enabled && mode != "outbox" {
+		return nil, nil, errors.New("event notification dispatch requires outbox delivery")
+	}
 	if mode == "" || mode == "direct" {
 		return nil, nil, nil
 	}
@@ -29,5 +36,12 @@ func Configure(ctx context.Context) (*Writer, *notificationcontract.Client, erro
 	if err != nil {
 		return nil, nil, err
 	}
-	return &Writer{Codec: codec}, client, nil
+	writer := &Writer{Codec: codec}
+	if enabled {
+		writer.Publisher, err = NewEventPublisher(ctx, os.Getenv("NOTIFICATIONS_OTP_QUEUE"), os.Getenv("NOTIFICATIONS_NORMAL_QUEUE"), os.Getenv("NOTIFICATIONS_URL"), os.Getenv("NOTIFICATIONS_TASK_ACCOUNT"))
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	return writer, client, nil
 }

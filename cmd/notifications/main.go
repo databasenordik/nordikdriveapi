@@ -19,6 +19,7 @@ import (
 	"nordik-drive-api/internal/notificationcontract"
 	"nordik-drive-api/internal/notifications"
 	"nordik-drive-api/internal/observability"
+	"nordik-drive-api/internal/workload"
 )
 
 func main() {
@@ -72,6 +73,16 @@ func run() error {
 	}
 	defer objects.Close()
 	service := &notifications.Service{Store: &notifications.Store{DB: db}, Codec: codec, Queue: queue, Provider: &notifications.SMTPProvider{Mail: mailer.NewService(cfg.GmailUser, cfg.GmailPass, "smtp.gmail.com", "587"), Storage: objects}}
+	if address := os.Getenv("NOTIFICATION_OUTBOX_SOURCE_URL"); address != "" {
+		tokens, err := workload.Source(ctx, address)
+		if err != nil {
+			return err
+		}
+		service.Source, err = notificationcontract.NewSourceClient(address, tokens)
+		if err != nil {
+			return err
+		}
+	}
 	grants := map[string]map[string]bool{"producer:identity": {legacy: true, worker: true}, "producer:records": {legacy: true, worker: true}, "producer:support": {legacy: true, worker: true}, "delivery": {task: true}, "recovery": {worker: true}}
 	grants["operator"] = map[string]bool{}
 	for _, operator := range strings.Split(os.Getenv("NOTIFICATIONS_OPERATOR_ACCOUNTS"), ",") {

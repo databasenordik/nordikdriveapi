@@ -1,6 +1,8 @@
 # Milestone 3: Notifications and signup email verification
 
-Planning date: 9 November 2026. Implementation prepared on 10 November 2026; deployment and cloud acceptance remain pending. See [the release guide](milestone-3-release.md) for the implemented configuration and release sequence.
+Planning date: 9 November 2026. Development deployment performed on 10 November 2026; see the verification report for completed cloud checks and remaining acceptance. See [the release guide](milestone-3-release.md) for the implemented configuration and release sequence.
+
+The 11 November completion update adds event-triggered first delivery/file-version processing, automatic bounded recovery, and finite signup cleanup. Normalization runs every six hours; other repair/cleanup scans run every twelve hours. Follow [the completion rollout](milestone-3-completion.md) for staged activation and acceptance. No manual replay workflow is required; uncertain sends remain visible without resending.
 
 ## 1. Outcome and agreed scope
 
@@ -33,11 +35,11 @@ Existing users keep their IDs, passwords, login behavior, and cookies. Their new
 
 ### User sequence
 
-1. The user enters an email address and requests a code.
+1. The user submits the validated account-details form. The frontend retains those details in memory and requests a code for the email address.
 2. Auth records a challenge and an email intent together. The UI says that the request was accepted, rather than claiming inbox delivery.
-3. Notifications sends the email. The user enters the six-digit code.
+3. Notifications sends the email. A separate verification screen lets the user enter the six-digit code, resend when allowed, or return to edit the saved details.
 4. Auth verifies the code and returns a short-lived, single-use signup proof. No account or login session exists yet.
-5. The user submits the signup form with that proof. Auth creates the account and consumes the proof in one database transaction.
+5. The same verification submission finishes signup with that proof. Auth creates the account and consumes the proof in one database transaction. No account or community is created before verification succeeds.
 6. A welcome email is recorded with that account transaction. The existing signup-success navigation and login behavior continue.
 
 The UI may collect the other form fields before verification, but it must not submit a password, create communities, or create an account merely to request an OTP. Editing the email clears the active challenge and proof. Keep the proof in memory; do not put codes, passwords, or proofs into URLs, analytics, or browser persistent storage.
@@ -168,7 +170,7 @@ Support screenshots already use `nordik-drive-photos/support_requests/...` and a
 | --- | --- | --- |
 | Cloud Run | One private `nordikdriveapi-notifications`; minimum zero; proposed maximum one serving instance, revision limit one, concurrency one, SQL pool maximum one | Independent deployment and bounded initial database use |
 | Cloud Tasks | Two regional queues, signup OTP and normal email; initially one concurrent dispatch per queue | Different expiry/retry controls and isolation of OTP dispatch settings |
-| Existing worker/Scheduler | One bounded dispatch/recovery job, proposed every minute | Recover committed outboxes and enqueue failures after scale-to-zero |
+| Existing worker/Scheduler | One bounded dispatch/recovery scan every twelve hours after event-path acceptance | Repair committed outboxes and enqueue failures; immediate delivery uses Cloud Tasks |
 | PostgreSQL | `notifications` schema and IAM database user; producer outbox, auth challenges/limits/proofs, nullable user verification timestamp | Delivery ownership, transaction durability, and verification state |
 | IAM | Notifications runtime identity, task-invocation identity, narrow invoker/queue/SQL/secret/object grants | Separate caller and data ownership |
 | Secrets | Reuse current SMTP values; introduce purpose-specific auth verification and notification-payload keys | Protect codes/proofs/payloads without changing JWT signing |

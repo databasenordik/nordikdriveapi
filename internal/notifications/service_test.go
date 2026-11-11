@@ -14,17 +14,21 @@ import (
 	"net/http/httptest"
 	"nordik-drive-api/internal/notificationcontract"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 )
 
 type fakeQueue struct {
+	mu    sync.Mutex
 	Fail  bool
 	Calls int
 }
 
 func (q *fakeQueue) Enqueue(context.Context, Delivery) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
 	q.Calls++
 	if q.Fail {
 		return errors.New("queue down")

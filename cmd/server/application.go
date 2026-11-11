@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
 	"errors"
+	"log/slog"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -55,6 +58,35 @@ func newApplication(cfg config.Config, dependencies *runtimeDependencies) (*appl
 	writer, remote, err := outbox.Configure(requestscope.Context(db))
 	if err != nil {
 		return nil, err
+	}
+	if writer != nil && os.Getenv("NOTIFICATION_OUTBOX_SOURCE_URL") != "" {
+		source, err := outbox.NewSourceHandler(db, os.Getenv("NOTIFICATION_OUTBOX_SOURCE_URL"), os.Getenv("NOTIFICATION_OUTBOX_READER_ACCOUNT"))
+		if err != nil {
+			return nil, err
+		}
+		r.POST("/internal/v1/notification-outbox/read", gin.WrapH(source))
+		r.POST("/internal/v1/notification-outbox/receipt", gin.WrapH(source))
+	}
+	fileEvents, err := file.NewVersionEventPublisher(requestscope.Context(db), db, os.Getenv("FILE_VERSION_EVENT_QUEUE"), os.Getenv("FILE_VERSION_WORKER_URL"), os.Getenv("FILE_VERSION_EVENT_ACCOUNT"))
+	if err != nil {
+		return nil, err
+	}
+	if (writer != nil && writer.Publisher != nil) || fileEvents != nil {
+		r.Use(func(c *gin.Context) {
+			ctx, pending := outbox.Capture(c.Request.Context())
+			c.Request = c.Request.WithContext(ctx)
+			c.Next()
+			if writer != nil {
+				outbox.PublishPending(ctx, db, writer.Publisher, pending)
+			}
+			if fileEvents != nil {
+				phase, stop := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+				if err := fileEvents.Publish(phase, pending.FileVersions()); err != nil {
+					slog.WarnContext(phase, "file_event_publication_failed")
+				}
+				stop()
+			}
+		})
 	}
 	var mailerService *mailer.Service
 	if writer == nil {

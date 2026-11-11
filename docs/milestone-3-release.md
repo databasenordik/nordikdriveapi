@@ -1,12 +1,14 @@
 # Milestone 3 implementation and development release
 
-The implementation is prepared locally. It has not changed Cloud Run, SQL, Secret Manager, queues, traffic, billing, or production. Cloud acceptance is still required before calling the milestone deployed.
+For the remaining automatic recovery, finite signup cleanup, and requested six/twelve-hour schedules, follow [the completion rollout](milestone-3-completion.md). The initial deployment sequence below is retained as a record; do not regenerate existing keys or repeat completed migration/provisioning steps.
+
+The development backend was deployed on 10 November 2026. Notifications, the two delivery queues, the additive schema/grants, producer outboxes, and mandatory signup verification are active. Frontend PR #79 and backend panic-fix PR #137 are deployed. Real verified signup, login, OTP, and welcome delivery passed; completed checks and the remaining acceptance items are recorded in [the verification report](milestone-3-verification.md). Production and billing were unchanged.
 
 [Local verification results](milestone-3-verification.md) record the checks already completed and the remaining cloud acceptance gates.
 
 ## What is implemented
 
-`cmd/notifications` is a separate private service. It owns encrypted delivery records, Cloud Tasks dispatch, bounded retries, Gmail SMTP, immutable Support screenshots, and audited operator replay. Auth, Records, and Support still select recipients and render their existing messages. Business updates and email intents commit together. An uncertain SMTP result becomes `unknown` and is never automatically resent.
+`cmd/notifications` is a separate private service. It owns encrypted delivery records, Cloud Tasks dispatch, bounded retries, Gmail SMTP, and immutable Support screenshots. Auth, Records, and Support still select recipients and render their existing messages. Business updates and email intents commit together. An uncertain SMTP result becomes `unknown` and is never automatically resent. Operator replay remains disabled; normal recovery is automatic.
 
 Signup now has these contracts:
 
@@ -18,7 +20,7 @@ Signup now has these contracts:
 
 Use `Idempotency-Key` for all three requests. A retry after a lost response uses the same key and body; a deliberate resend/new code attempt uses a new key. Codes and proofs expire in ten minutes. Resend waits sixty seconds and invalidates earlier codes/proofs. Five wrong codes exhaust a challenge; persistent email/IP limits also apply. Existing accounts, password-reset routes, JWT values, and login cookies retain their current behavior.
 
-The companion frontend changes are in `C:\Nordik Projects\nordik-drive`. The proof stays in memory, editing the email clears it, and neither community nor account creation runs before verification. Both repositories must be reviewed for this release.
+The companion frontend changes are in `C:\Nordik Projects\nordik-drive`. Users first submit the validated account-details form, then enter the emailed code on a separate screen to finish signup. Buttons remain enabled for validation and are disabled while requests run. Details/proofs stay in memory; editing the email clears verification. Neither community nor account creation runs before verification succeeds.
 
 ## How independent releases work
 

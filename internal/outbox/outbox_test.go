@@ -12,11 +12,13 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 	"nordik-drive-api/internal/notificationcontract"
+	"sync"
 	"testing"
 	"time"
 )
 
 type remoteFixture struct {
+	mu                        sync.Mutex
 	AcceptError, RecoverError error
 	Accepted                  []string
 	States                    map[string]string
@@ -28,7 +30,9 @@ func (f *remoteFixture) Accept(_ context.Context, c notificationcontract.Command
 	if f.BeforeAccept != nil {
 		f.BeforeAccept()
 	}
+	f.mu.Lock()
 	f.Accepted = append(f.Accepted, c.ID)
+	f.mu.Unlock()
 	return c.ID, f.AcceptError
 }
 func (f *remoteFixture) Status(_ context.Context, ids []string) (map[string]string, error) {
@@ -115,8 +119,8 @@ func TestDispatcherRecoversEnqueueFailureAndErasesCompletedOTPPayload(t *testing
 			t.Fatal("producer connection held during remote intake")
 		}
 	}
-	if err := d.Run(context.Background()); err != nil {
-		t.Fatal(err)
+	if err := d.Run(context.Background()); err == nil {
+		t.Fatal("intake outage was not reported")
 	}
 	var record Record
 	_ = db.First(&record, "id = ?", id).Error

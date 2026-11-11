@@ -274,7 +274,7 @@ resource "google_cloud_run_v2_service" "backend" {
       }
       dynamic "env" {
 
-        for_each = merge(lookup(var.runtime_settings, each.key, {}), local.common_env, local.notification_producer_env, local.notification_source_env, local.notification_event_env, local.file_version_event_env, var.enable_notifications ? { SIGNUP_REQUIRE_VERIFIED_EMAIL = tostring(each.key == "legacy" && var.signup_require_verified_email) } : {}, {
+        for_each = merge(lookup(var.runtime_settings, each.key, {}), local.common_env, local.notification_producer_env, each.key == "legacy" ? local.notification_source_env : {}, local.notification_event_env, local.file_version_event_env, var.enable_notifications ? { SIGNUP_REQUIRE_VERIFIED_EMAIL = tostring(each.key == "legacy" && var.signup_require_verified_email) } : {}, {
 
           APP_ROLE                  = each.key == "worker" ? "worker" : "monolith"
           SCHEDULER_MODE            = "external"

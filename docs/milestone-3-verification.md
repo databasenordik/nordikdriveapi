@@ -70,4 +70,6 @@ The completion source adds automatic first-processing tasks, isolated bounded re
 
 Local checks passed: full Go regression, real PostgreSQL integration (including cleanup retention, locked rows, singleton lock, one-connection operation, and migration 004), static checks, 51 Terraform mock runs, 13 inventory/migration/secret-script tests, and 10 service-selection tests. Combined coverage: gateway 98.7%, Notifications 91.9%, Worker core 96.2%. Focused tests also prove that an unrelated Support backlog does not delay a new finalized notification.
 
-This update has not been deployed. The serving development revisions above were rechecked unchanged. Envoy/race results, the reviewed release commit, new digests/revisions, final schedules, cold delivery, and browser acceptance must be recorded when completed. Existing JWT/key values, database tier, and production remain unchanged.
+Real Envoy routing and Linux race checks passed, including the new file task path. The race run exposed a test fixture using two clock readings at the exact ten-minute OTP boundary; it now derives both timestamps from one reading and the package rerun passed.
+
+This update has not been deployed. The serving development revisions above were rechecked unchanged. The reviewed release commit, new digests/revisions, final schedules, cold delivery, and browser acceptance must be recorded when completed. Existing JWT/key values, database tier, and production remain unchanged.

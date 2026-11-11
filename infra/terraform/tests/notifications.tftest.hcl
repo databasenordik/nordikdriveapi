@@ -166,6 +166,7 @@ run "notification_source_can_precede_producer_cutover" {
       length(google_cloud_run_v2_service_iam_member.notification_source_reader) == 1 &&
       length(google_cloud_tasks_queue_iam_member.notification_event_producer) == 0 &&
       length(google_cloud_tasks_queue.file_events) == 0 &&
+      !contains([for env in google_cloud_run_v2_service.backend["worker"].template[0].containers[0].env : env.name], "NOTIFICATION_OUTBOX_SOURCE_URL") &&
       one([for env in google_cloud_run_v2_service.notifications[0].template[0].containers[0].env : env.value if env.name == "NOTIFICATION_OUTBOX_SOURCE_URL"]) == local.notification_outbox_source_url
     )
     error_message = "Private source/receipts must be deployable before publishers without creating another email queue."

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -33,7 +34,10 @@ type Record struct {
 
 func (Record) TableName() string { return "notification_outbox" }
 
-type Writer struct{ Codec *notificationcontract.Codec }
+type Writer struct {
+	Codec     *notificationcontract.Codec
+	Publisher *EventPublisher
+}
 
 func (w *Writer) Put(tx *gorm.DB, command notificationcontract.Command, payload notificationcontract.Payload) (string, error) {
 	command.Version = 1
@@ -55,6 +59,7 @@ func (w *Writer) Put(tx *gorm.DB, command notificationcontract.Command, payload 
 		return "", result.Error
 	}
 	if result.RowsAffected == 1 {
+		track(tx.Statement.Context, record.ID)
 		return record.ID, nil
 	}
 	var existing Record
@@ -65,6 +70,7 @@ func (w *Writer) Put(tx *gorm.DB, command notificationcontract.Command, payload 
 	if json.Unmarshal([]byte(existing.Command), &previous) != nil || !hmac.Equal([]byte(previous.Fingerprint), []byte(w.Codec.Fingerprint(previous, payload))) {
 		return "", errors.New("notification event key conflicts with its original payload")
 	}
+	track(tx.Statement.Context, existing.ID)
 	return existing.ID, nil
 }
 
@@ -96,48 +102,124 @@ type Dispatcher struct {
 func (d *Dispatcher) Run(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	for range 10 {
-		var record Record
-		now := time.Now().UTC()
-		lease := now.Add(45 * time.Second)
-		err := d.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-			query := tx.Where("state = ? AND next_attempt <= ? AND (lease_until IS NULL OR lease_until < ?)", "pending", now, now).Order("created_at ASC")
-			if tx.Dialector.Name() == "postgres" {
-				query = query.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"})
-			}
-			if err := query.First(&record).Error; err != nil {
-				return err
-			}
-			return tx.Model(&record).Updates(map[string]any{"lease_until": lease, "attempts": gorm.Expr("attempts + 1")}).Error
-		})
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			break
+	// Separate deadlines reserve time for repair and reconciliation even when
+	// intake is unavailable. Failures do not suppress later phases.
+	return errors.Join(
+		RunPhase(ctx, 5*time.Second, d.Dispatch),
+		RunPhase(ctx, 5*time.Second, d.Remote.Recover),
+		RunPhase(ctx, 2*time.Second, d.Cleanup),
+		RunPhase(ctx, 3*time.Second, d.Reconcile),
+	)
+}
+
+// RunPhase bounds synchronous work and always joins it before returning.
+func RunPhase(ctx context.Context, budget time.Duration, run func(context.Context) error) error {
+	phase, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+	return run(phase)
+}
+
+// Dispatch reserves five of ten slots for each kind; an empty group yields its
+// unused slots. Two joined branches prevent a stalled kind blocking its peer.
+func (d *Dispatcher) Dispatch(ctx context.Context) error {
+	ctx, stop := context.WithTimeout(ctx, 5*time.Second)
+	defer stop()
+	var failures error
+	for range 100 {
+		count, err := d.dispatchBatch(ctx)
+		failures = errors.Join(failures, err)
+		if count == 0 || ctx.Err() != nil {
+			return failures
 		}
+	}
+	return errors.Join(failures, errors.New("notification dispatch batch limit reached"))
+}
+
+func (d *Dispatcher) dispatchBatch(ctx context.Context) (int, error) {
+	now := time.Now().UTC()
+	load := func(kind string, limit int) ([]Record, error) {
+		var rows []Record
+		query := d.DB.WithContext(ctx).Where("kind = ? AND state = ? AND next_attempt <= ? AND (lease_until IS NULL OR lease_until < ?)", kind, "pending", now, now)
+		if kind == "otp" {
+			query = query.Order("deadline ASC")
+		}
+		err := query.Order("created_at ASC").Order("id ASC").Limit(limit).Find(&rows).Error
+		return rows, err
+	}
+	otp, err := load("otp", 5)
+	if err != nil {
+		return 0, err
+	}
+	normal, err := load("normal", 10-len(otp))
+	if err != nil {
+		return 0, err
+	}
+	if len(normal) < 5 {
+		otp, err = load("otp", 10-len(normal))
 		if err != nil {
-			return err
+			return 0, err
 		}
-		var command notificationcontract.Command
-		if json.Unmarshal([]byte(record.Command), &command) != nil {
-			return errors.New("invalid stored outbox command")
-		}
-		state, delivery := "pending", ""
-		if !command.Deadline.After(now) {
-			state = "expired"
-		} else {
-			id, acceptErr := d.Remote.Accept(ctx, command)
-			if acceptErr == nil {
-				state, delivery = "accepted", id
+	}
+	var joined sync.WaitGroup
+	var failures [2]error
+	for group, rows := range [][]Record{otp, normal} {
+		joined.Add(1)
+		go func() {
+			defer joined.Done()
+			for _, row := range rows {
+				if ctx.Err() != nil {
+					failures[group] = errors.Join(failures[group], ctx.Err())
+					break
+				}
+				failures[group] = errors.Join(failures[group], d.dispatchRecord(ctx, row.ID))
 			}
+		}()
+	}
+	joined.Wait()
+	return len(otp) + len(normal), errors.Join(failures[:]...)
+}
+
+func (d *Dispatcher) dispatchRecord(ctx context.Context, id string) error {
+	var record Record
+	now := time.Now().UTC()
+	lease := now.Add(45 * time.Second)
+	err := d.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		query := tx.Where("id = ? AND state = ? AND next_attempt <= ? AND (lease_until IS NULL OR lease_until < ?)", id, "pending", now, now)
+		if tx.Dialector.Name() == "postgres" {
+			query = query.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"})
 		}
-		if err := d.DB.WithContext(ctx).Model(&record).Where("state = ?", "pending").Updates(map[string]any{"state": state, "delivery_id": delivery, "lease_until": nil, "next_attempt": now.Add(time.Minute)}).Error; err != nil {
+		if err := query.First(&record).Error; err != nil {
 			return err
 		}
+		return tx.Model(&record).Updates(map[string]any{"lease_until": lease, "attempts": gorm.Expr("attempts + 1")}).Error
+	})
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil
 	}
-	if err := d.Cleanup(ctx); err != nil {
+	if err != nil {
 		return err
 	}
-	if err := d.Remote.Recover(ctx); err != nil {
+	var command notificationcontract.Command
+	if json.Unmarshal([]byte(record.Command), &command) != nil {
+		// Quarantine a corrupt intent without retaining unreadable payload or
+		// repeatedly blocking other records. Keep its persistent event key.
+		err := d.DB.WithContext(ctx).Model(&record).Updates(map[string]any{"state": "failed", "command": "", "payload_erased": true, "lease_until": nil}).Error
+		return errors.Join(errors.New("invalid stored outbox command"), err)
+	}
+	state, delivery := "pending", ""
+	var intakeErr error
+	if !command.Deadline.After(now) {
+		state = "expired"
+	} else {
+		id, acceptErr := d.Remote.Accept(ctx, command)
+		if acceptErr == nil {
+			state, delivery = "accepted", id
+		} else {
+			intakeErr = errors.New("notification intake unavailable")
+		}
+	}
+	if err := d.DB.WithContext(ctx).Model(&record).Where("state = ?", "pending").Updates(map[string]any{"state": state, "delivery_id": delivery, "lease_until": nil, "next_attempt": now.Add(time.Minute)}).Error; err != nil {
 		return err
 	}
-	return d.Reconcile(ctx)
+	return intakeErr
 }

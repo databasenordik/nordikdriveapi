@@ -201,7 +201,7 @@ resource "google_cloud_run_v2_service" "notifications" {
         for_each = merge(lookup(var.runtime_settings, "notifications", {
 
           }
-          ), local.common_env, {
+          ), local.common_env, var.enable_notification_source ? { NOTIFICATION_OUTBOX_SOURCE_URL = local.notification_outbox_source_url } : {}, {
 
           DB_SCHEMA                        = "notifications"
           DB_USER                          = google_sql_user.iam["notifications"].name
@@ -372,10 +372,10 @@ resource "google_cloud_scheduler_job" "notification_dispatch" {
   project          = var.project_id
   name             = "notification-outbox-dispatch"
   region           = var.region
-  schedule         = "* * * * *"
-  time_zone        = "America/Toronto"
+  schedule         = var.enable_low_frequency_reconciliation ? "0 */12 * * *" : "* * * * *"
+  time_zone        = "Etc/UTC"
   paused           = !var.notification_delivery_enabled || !var.enable_schedules
-  attempt_deadline = "30s"
+  attempt_deadline = "60s"
   retry_config {
     retry_count          = 2
     min_backoff_duration = "10s"
@@ -389,7 +389,7 @@ resource "google_cloud_scheduler_job" "notification_dispatch" {
     uri         = "${google_cloud_run_v2_service.backend["worker"].uri}/internal/jobs/notification-outbox-dispatch/run"
     oidc_token {
       service_account_email = google_service_account.runtime["scheduler"].email
-      audience              = google_cloud_run_v2_service.backend["worker"].uri
+      audience              = var.enable_file_version_events ? local.file_version_worker_url : google_cloud_run_v2_service.backend["worker"].uri
     }
 
 

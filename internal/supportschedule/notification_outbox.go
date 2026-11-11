@@ -160,11 +160,19 @@ func sameStaff(a, b *uint) bool {
 	return *a == *b
 }
 func (s *Service) RecoverNotifications(ctx context.Context) error {
+	return s.recoverNotifications(ctx, nil)
+}
+
+func (s *Service) recoverNotifications(ctx context.Context, filter func(*gorm.DB) *gorm.DB) error {
 	if s.Outbox == nil {
 		return nil
 	}
 	var pending []SupportScheduleAuditLog
-	if err := s.DB.WithContext(ctx).Where("notification_state = ? AND (notification_next_attempt IS NULL OR notification_next_attempt <= ?)", "pending", time.Now().UTC()).Order("notification_next_attempt ASC, id ASC").Limit(10).Find(&pending).Error; err != nil {
+	query := s.DB.WithContext(ctx).Where("notification_state = ? AND (notification_next_attempt IS NULL OR notification_next_attempt <= ?)", "pending", time.Now().UTC())
+	if filter != nil {
+		query = filter(query)
+	}
+	if err := query.Order("notification_next_attempt ASC, id ASC").Limit(10).Find(&pending).Error; err != nil {
 		return err
 	}
 	for _, event := range pending {

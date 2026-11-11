@@ -95,3 +95,26 @@ func TestExpiredSupportSnapshotIsErasedWithoutSending(t *testing.T) {
 		t.Fatal("expired snapshot retained or processed")
 	}
 }
+
+func TestNewSupportNotificationDoesNotWaitBehindRepairBacklog(t *testing.T) {
+	f := newScheduleFixture(t)
+	codec, _ := notificationcontract.NewCodec(`{"1":"`+base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32))+`"}`, "1")
+	if err := f.service.DB.AutoMigrate(&outbox.Record{}); err != nil {
+		t.Fatal(err)
+	}
+	f.service.Outbox = &outbox.Writer{Codec: codec}
+	f.service.MeetingProvider = &fakeMeetingProvider{}
+	for range 12 {
+		row := SupportScheduleAuditLog{EntityType: "support_request", Action: "old", Details: []byte(`{}`), NotificationState: "pending", NotificationSnapshot: "malformed old intent", CreatedAt: time.Now().Add(-time.Hour)}
+		if err := f.service.DB.Create(&row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := f.service.CreateCall(f.survivor, CreateCallInput{ScheduledStart: f.at(1, 11, 0).Format(time.RFC3339), DurationMinutes: 30, Subject: "Help", Message: "Details"}); err != nil {
+		t.Fatal(err)
+	}
+	var count int64
+	if err := f.service.DB.Model(&outbox.Record{}).Count(&count).Error; err != nil || count != 2 {
+		t.Fatal("fresh finalized notification was blocked by unrelated backlog", count, err)
+	}
+}

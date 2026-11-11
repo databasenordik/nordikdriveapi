@@ -7,7 +7,7 @@ locals {
     var.deployment_stage == "cutover" && var.public_gateway_service_name != null ? { public = var.public_gateway_service_name } : {},
   ) : {}
   gateway_deployment_count = length(local.gateway_deployments)
-  roles                    = setunion(toset(["gateway", "legacy", "worker", "scheduler", "migrations"]), var.enable_notifications ? toset(["notifications", "tasks"]) : toset([]))
+  roles                    = setunion(toset(["gateway", "legacy", "worker", "scheduler", "migrations"]), var.enable_notifications ? toset(["notifications", "tasks"]) : toset([]), var.enable_file_version_events ? toset(["work-tasks"]) : toset([]))
   sql_owners               = setunion(toset(["gateway", "legacy", "worker", "migrations"]), var.enable_notifications ? toset(["notifications"]) : toset([]))
   runtime_owners           = setunion(toset(["gateway", "legacy", "worker"]), var.enable_notifications ? toset(["notifications"]) : toset([]))
   pools = {
@@ -17,7 +17,7 @@ locals {
   }
   runtime_connections   = sum([for owner, pool in local.pools : pool * var.max_instances[owner] * (owner == "gateway" ? local.gateway_deployment_count : 1)]) + local.notification_connections
   rollout_connections   = sum([for owner, pool in local.pools : pool * var.rollout_extra_instances[owner] * (owner == "gateway" ? local.gateway_deployment_count : 1)]) + local.notification_connections
-  allocated_connections = local.runtime_connections + local.rollout_connections + var.db_pool_limits.cleanup + var.other_reserved_connections
+  allocated_connections = local.runtime_connections + local.rollout_connections + var.db_pool_limits.cleanup + local.signup_cleanup_connections + var.other_reserved_connections
   connection_budget_limit = min(
     floor(var.database_connection_capacity * 0.8),
     var.database_connection_capacity - var.database_superuser_reserved_connections,
@@ -40,10 +40,10 @@ locals {
   secret_ids = toset([for item in values(local.secret_pairs) : item.secret_id])
   schedules = {
 
-    file-review-email   = "*/5 * * * *"
-    form-review-email   = "*/5 * * * *"
-    file-normalization  = "*/10 * * * *"
-    file-reconciliation = "* * * * *"
+    file-review-email   = var.enable_low_frequency_reconciliation ? "5 */12 * * *" : "*/5 * * * *"
+    form-review-email   = var.enable_low_frequency_reconciliation ? "10 */12 * * *" : "*/5 * * * *"
+    file-normalization  = var.enable_low_frequency_reconciliation ? "15 */6 * * *" : "*/10 * * * *"
+    file-reconciliation = var.enable_low_frequency_reconciliation ? "20 */12 * * *" : "* * * * *"
     daily-honour        = "0 0 * * *"
     support-maintenance = "0 0 * * *"
 
@@ -136,7 +136,7 @@ resource "terraform_data" "safeguards" {
 
 resource "google_project_service" "apis" {
 
-  for_each           = setunion(toset(["run.googleapis.com", "sqladmin.googleapis.com", "secretmanager.googleapis.com", "cloudscheduler.googleapis.com", "iamcredentials.googleapis.com", "cloudtrace.googleapis.com", "monitoring.googleapis.com"]), var.enable_notifications ? toset(["cloudtasks.googleapis.com"]) : toset([]))
+  for_each           = setunion(toset(["run.googleapis.com", "sqladmin.googleapis.com", "secretmanager.googleapis.com", "cloudscheduler.googleapis.com", "iamcredentials.googleapis.com", "cloudtrace.googleapis.com", "monitoring.googleapis.com"]), var.enable_notifications || var.enable_file_version_events ? toset(["cloudtasks.googleapis.com"]) : toset([]))
   service            = each.key
   disable_on_destroy = false
 
@@ -225,6 +225,9 @@ resource "google_cloud_run_v2_service" "backend" {
   location            = var.region
   deletion_protection = true
   ingress             = "INGRESS_TRAFFIC_ALL"
+  custom_audiences = each.key == "legacy" && var.enable_notification_source ? [local.notification_outbox_source_url] : (
+    each.key == "worker" && var.enable_file_version_events ? [local.file_version_worker_url] : []
+  )
   scaling {
     max_instance_count = var.max_instances[each.key]
   }
@@ -271,7 +274,7 @@ resource "google_cloud_run_v2_service" "backend" {
       }
       dynamic "env" {
 
-        for_each = merge(lookup(var.runtime_settings, each.key, {}), local.common_env, local.notification_producer_env, var.enable_notifications ? { SIGNUP_REQUIRE_VERIFIED_EMAIL = tostring(each.key == "legacy" && var.signup_require_verified_email) } : {}, {
+        for_each = merge(lookup(var.runtime_settings, each.key, {}), local.common_env, local.notification_producer_env, local.notification_source_env, local.notification_event_env, local.file_version_event_env, var.enable_notifications ? { SIGNUP_REQUIRE_VERIFIED_EMAIL = tostring(each.key == "legacy" && var.signup_require_verified_email) } : {}, {
 
           APP_ROLE                  = each.key == "worker" ? "worker" : "monolith"
           SCHEDULER_MODE            = "external"
@@ -560,7 +563,7 @@ resource "google_cloud_scheduler_job" "business" {
   name             = each.key
   region           = var.region
   schedule         = each.value
-  time_zone        = "America/Toronto"
+  time_zone        = var.enable_low_frequency_reconciliation && !contains(["daily-honour", "support-maintenance"], each.key) ? "Etc/UTC" : "America/Toronto"
   paused           = !var.enable_schedules
   attempt_deadline = "930s"
   retry_config {
@@ -578,7 +581,7 @@ resource "google_cloud_scheduler_job" "business" {
     oidc_token {
 
       service_account_email = google_service_account.runtime["scheduler"].email
-      audience              = google_cloud_run_v2_service.backend["worker"].uri
+      audience              = var.enable_file_version_events ? local.file_version_worker_url : google_cloud_run_v2_service.backend["worker"].uri
 
     }
 
@@ -662,7 +665,7 @@ resource "google_cloud_scheduler_job" "cleanup" {
   count     = local.runtime_enabled ? 1 : 0
   name      = "${var.name_prefix}-limit-cleanup"
   region    = var.region
-  schedule  = "*/10 * * * *"
+  schedule  = var.enable_low_frequency_reconciliation ? "25 */12 * * *" : "*/10 * * * *"
   time_zone = "Etc/UTC"
   paused    = !var.enable_schedules
   http_target {

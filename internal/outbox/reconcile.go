@@ -17,7 +17,7 @@ func deliveryTerminal(state string) bool {
 func (d *Dispatcher) Reconcile(ctx context.Context) error {
 	now := time.Now().UTC()
 	var rows []Record
-	if err := d.DB.WithContext(ctx).Where("next_attempt <= ? AND (state = ? OR (state IN ? AND kind = ? AND deadline > ?))", now, "accepted", []string{"failed", "unknown"}, "normal", now).Order("next_attempt ASC").Limit(50).Find(&rows).Error; err != nil {
+	if err := d.DB.WithContext(ctx).Where("delivery_id <> ?", "").Where("next_attempt <= ? AND (state = ? OR (state IN ? AND kind = ? AND deadline > ?))", now, "accepted", []string{"failed", "unknown"}, "normal", now).Order("next_attempt ASC").Limit(50).Find(&rows).Error; err != nil {
 		return err
 	}
 	if len(rows) == 0 {
@@ -58,7 +58,10 @@ func (d *Dispatcher) Cleanup(ctx context.Context) error {
 	for _, row := range rows {
 		var command notificationcontract.Command
 		if err := json.Unmarshal([]byte(row.Command), &command); err != nil {
-			return err
+			if err := d.DB.WithContext(ctx).Model(&row).Updates(map[string]any{"command": "", "payload_erased": true}).Error; err != nil {
+				return err
+			}
+			continue
 		}
 		command.Ciphertext = ""
 		encoded, err := json.Marshal(command)

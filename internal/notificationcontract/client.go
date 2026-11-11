@@ -54,7 +54,7 @@ func (c *Client) call(ctx context.Context, path string, input, output any) error
 		return errors.New("notification operation not accepted")
 	}
 	if output != nil {
-		return json.NewDecoder(io.LimitReader(response.Body, 64*1024)).Decode(output)
+		return json.NewDecoder(io.LimitReader(response.Body, 512*1024)).Decode(output)
 	}
 	return nil
 }

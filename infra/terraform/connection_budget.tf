@@ -78,6 +78,7 @@ output "connection_budget" {
     steady_runtime             = local.runtime_connections
     rollout_overlap            = local.rollout_connections
     cleanup                    = var.db_pool_limits.cleanup
+    signup_cleanup             = local.signup_cleanup_connections
     existing_and_other_clients = var.other_reserved_connections
     total_allocated            = local.allocated_connections
     remaining_allocation       = local.connection_budget_limit - local.allocated_connections

@@ -11,6 +11,7 @@ import (
 
 var ErrConflict = errors.New("notification key conflict")
 var ErrBusy = errors.New("notification is already being processed")
+var ErrNotFound = gorm.ErrRecordNotFound
 
 type Delivery struct {
 	MaxAttempts        int    `gorm:"not null;default:5"`
@@ -143,8 +144,13 @@ func (s *Store) Claim(ctx context.Context, id string, now time.Time) (Delivery, 
 }
 func (s *Store) Finish(ctx context.Context, row Delivery, state string, now time.Time) error {
 	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		updates := map[string]any{"state": state, "lease_until": nil, "updated_at": now, "next_attempt": now.Add(time.Minute)}
-		if row.Kind == "otp" && terminal(state) {
+		nextAttempt := now.Add(time.Minute)
+		if state == "retry" {
+			delay := min(60, 10*(1<<min(max(row.Attempts-1, 0), 3)))
+			nextAttempt = now.Add(time.Duration(delay) * time.Second)
+		}
+		updates := map[string]any{"state": state, "lease_until": nil, "updated_at": now, "next_attempt": nextAttempt}
+		if state == "provider_accepted" || (row.Kind == "otp" && terminal(state)) {
 			updates["command"] = ""
 		}
 		result := tx.Model(&Delivery{}).Where("id = ? AND state = ? AND attempts = ?", row.ID, "sending", row.Attempts).Updates(updates)
@@ -158,9 +164,30 @@ func (s *Store) Finish(ctx context.Context, row Delivery, state string, now time
 	})
 }
 func (s *Store) Due(ctx context.Context, now time.Time) ([]Delivery, error) {
-	var rows []Delivery
-	err := s.DB.WithContext(ctx).Where("state IN ? AND next_attempt <= ?", []string{"pending_enqueue", "queued", "retry", "sending"}, now).Order("next_attempt ASC").Limit(10).Find(&rows).Error
-	return rows, err
+	load := func(kind string, limit int) ([]Delivery, error) {
+		var rows []Delivery
+		query := s.DB.WithContext(ctx).Where("kind = ? AND state IN ? AND next_attempt <= ? AND (state <> ? OR lease_until IS NULL OR lease_until <= ?)", kind, []string{"pending_enqueue", "queued", "retry", "sending"}, now, "sending", now)
+		if kind == "otp" {
+			query = query.Order("deadline ASC")
+		}
+		err := query.Order("next_attempt ASC").Order("id ASC").Limit(limit).Find(&rows).Error
+		return rows, err
+	}
+	otp, err := load("otp", 5)
+	if err != nil {
+		return nil, err
+	}
+	normal, err := load("normal", 10-len(otp))
+	if err != nil {
+		return nil, err
+	}
+	if len(normal) < 5 {
+		otp, err = load("otp", 10-len(normal))
+		if err != nil {
+			return nil, err
+		}
+	}
+	return append(otp, normal...), nil
 }
 func (s *Store) Queued(ctx context.Context, row Delivery, now time.Time) error {
 	return s.DB.WithContext(ctx).Model(&Delivery{}).Where("id = ? AND state IN ?", row.ID, []string{"pending_enqueue", "queued", "retry"}).Updates(map[string]any{"state": "queued", "dispatch_generation": gorm.Expr("dispatch_generation + 1"), "next_attempt": now.Add(2 * time.Minute), "updated_at": now}).Error

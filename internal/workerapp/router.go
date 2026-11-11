@@ -10,6 +10,7 @@ import (
 	"gorm.io/gorm"
 	"nordik-drive-api/config"
 	"nordik-drive-api/internal/chat"
+	"nordik-drive-api/internal/file"
 	"nordik-drive-api/internal/honour"
 	"nordik-drive-api/internal/jobs"
 	"nordik-drive-api/internal/mailer"
@@ -74,20 +75,43 @@ func Router(ctx context.Context, cfg config.Config, db *gorm.DB, pool *sql.DB, v
 		registry["notification-outbox-dispatch"] = func(ctx context.Context) error {
 			ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 			defer cancel()
-			owner := *support
-			owner.DB = db.WithContext(ctx)
-			if err := owner.RecoverNotifications(ctx); err != nil {
+			dispatchErr := (&outbox.Dispatcher{DB: db, Remote: remote}).Run(ctx)
+			supportErr := outbox.RunPhase(ctx, 3*time.Second, func(phase context.Context) error {
+				owner := *support
+				owner.DB = db.WithContext(phase)
+				return owner.RecoverNotifications(phase)
+			})
+			statusErr := outbox.RunPhase(ctx, 2*time.Second, func(phase context.Context) error {
+				return supportrequest.ReconcileOutgoing(phase, db, remote)
+			})
+			return errors.Join(dispatchErr, supportErr, statusErr)
+		}
+	}
+	if writer != nil && writer.Publisher != nil {
+		for name, run := range registry {
+			registry[name] = func(ctx context.Context) error {
+				scope, pending := outbox.Capture(ctx)
+				err := run(scope)
+				outbox.PublishPending(scope, db, writer.Publisher, pending)
 				return err
 			}
-			if err := (&outbox.Dispatcher{DB: db, Remote: remote}).Run(ctx); err != nil {
-				return err
-			}
-			return supportrequest.ReconcileOutgoing(ctx, db, remote)
 		}
 	}
 	router := gin.New()
 	router.Use(observability.Middleware())
 	router.GET("/healthz", func(c *gin.Context) { c.Status(200) })
+	if account := os.Getenv("FILE_VERSION_EVENT_ACCOUNT"); account != "" {
+		audience, scheduler := os.Getenv("FILE_VERSION_WORKER_URL"), os.Getenv("WORKER_SCHEDULER_ACCOUNT")
+		if audience == "" || scheduler == "" || scheduler == account {
+			return nil, errors.New("distinct file task and scheduler identities required")
+		}
+		router.Use(jobs.SchedulerGuard(audience, scheduler))
+		handler, err := file.NewVersionEventHandler(db, audience, account)
+		if err != nil {
+			return nil, err
+		}
+		router.POST("/internal/v1/work/file-version", gin.WrapH(handler))
+	}
 	jobs.RegisterWorker(router, &jobs.Runner{Pool: pool, Jobs: registry}, prefix)
 	observability.RegisterControls(router, pool)
 	return router, nil

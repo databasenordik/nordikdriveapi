@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"sync"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -21,11 +22,17 @@ type Queue interface {
 type Provider interface {
 	Deliver(context.Context, notificationcontract.Payload) string
 }
+
+type Source interface {
+	Read(context.Context, string) (notificationcontract.SourceRecord, error)
+	Receipt(context.Context, notificationcontract.SourceReceipt) error
+}
 type Service struct {
 	Store    Repository
 	Codec    *notificationcontract.Codec
 	Queue    Queue
 	Provider Provider
+	Source   Source
 	Clock    func() time.Time
 }
 
@@ -36,6 +43,10 @@ func (s *Service) now() time.Time {
 	return time.Now().UTC()
 }
 func (s *Service) Accept(ctx context.Context, command notificationcontract.Command) (string, error) {
+	return s.accept(ctx, command, true)
+}
+
+func (s *Service) accept(ctx context.Context, command notificationcontract.Command, enqueue bool) (string, error) {
 	ctx, span := otel.Tracer("nordik/notifications").Start(ctx, "notifications.accept")
 	defer span.End()
 	now := s.now()
@@ -51,7 +62,7 @@ func (s *Service) Accept(ctx context.Context, command notificationcontract.Comma
 		return "", err
 	}
 	// Intake is durable already. Recovery repairs a failed enqueue, including crashes.
-	if row.State == "pending_enqueue" {
+	if enqueue && row.State == "pending_enqueue" {
 		_ = s.enqueue(ctx, row)
 	}
 	slog.InfoContext(ctx, "notification_intake", "delivery_id", row.ID, "producer", row.Producer, "kind", row.Kind, "state", row.State, "intent_age_ms", now.Sub(command.CreatedAt).Milliseconds())
@@ -68,8 +79,31 @@ func (s *Service) Deliver(ctx context.Context, id string) error {
 	ctx, span := otel.Tracer("nordik/notifications").Start(ctx, "notifications.deliver")
 	defer span.End()
 	row, send, err := s.Store.Claim(ctx, id, s.now())
-	if err != nil || !send {
+	sourceID := id
+	if errors.Is(err, ErrNotFound) && s.Source != nil {
+		record, readErr := s.Source.Read(ctx, id)
+		if readErr != nil {
+			return errors.New("notification intent source unavailable")
+		}
+		if terminal(record.State) {
+			return s.Source.Receipt(ctx, notificationcontract.SourceReceipt{OutboxID: sourceID, DeliveryID: id, State: record.State})
+		}
+		if record.State != "pending" || record.Command.ID != id {
+			return errors.New("notification source requires reconciliation")
+		}
+		// This durable task is already executing. Do not create a second task
+		// merely to record its producer's committed command.
+		id, err = s.accept(ctx, record.Command, false)
+		if err != nil {
+			return err
+		}
+		row, send, err = s.Store.Claim(ctx, id, s.now())
+	}
+	if err != nil {
 		return err
+	}
+	if !send {
+		return s.receipt(ctx, sourceID, id)
 	}
 	var command notificationcontract.Command
 	started := s.now()
@@ -88,6 +122,9 @@ func (s *Service) Deliver(ctx context.Context, id string) error {
 	default:
 		state = "unknown"
 	}
+	if state == "retry" && row.Attempts >= row.attemptLimit() {
+		state = "failed"
+	}
 	// Persist the provider result even if the task disconnected. Otherwise recovery
 	// would have to classify a known acceptance as unknown.
 	finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
@@ -98,31 +135,68 @@ func (s *Service) Deliver(ctx context.Context, id string) error {
 	}
 	span.SetAttributes(attribute.String("notification.outcome", state), attribute.String("notification.kind", row.Kind))
 	slog.InfoContext(finishCtx, "notification_delivery", "delivery_id", id, "producer", row.Producer, "kind", row.Kind, "outcome", state, "attempt", row.Attempts, "duration_ms", s.now().Sub(started).Milliseconds(), "intent_age_ms", s.now().Sub(command.CreatedAt).Milliseconds())
+	if err := s.receipt(finishCtx, sourceID, id); err != nil {
+		return err
+	}
 	if state == "retry" {
 		return errors.New("retryable notification failure")
 	}
 	return nil
 }
-func (s *Service) Recover(ctx context.Context) error {
-	rows, err := s.Store.Due(ctx, s.now())
+
+func (s *Service) receipt(ctx context.Context, sourceID, deliveryID string) error {
+	if s.Source == nil {
+		return nil
+	}
+	states, err := s.Store.Statuses(ctx, []string{deliveryID})
 	if err != nil {
 		return err
 	}
-	for _, row := range rows {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if row.State == "sending" || !row.Deadline.After(s.now()) || row.Attempts >= row.attemptLimit() {
-			// Claim only to classify expired leases/deadlines; never make a provider call.
-			_, _, err := s.Store.Claim(ctx, row.ID, s.now())
-			if err != nil && !errors.Is(err, ErrBusy) {
-				return err
-			}
-			continue
-		}
-		if err := s.enqueue(ctx, row); err != nil {
-			return err
+	if err := s.Source.Receipt(ctx, notificationcontract.SourceReceipt{OutboxID: sourceID, DeliveryID: deliveryID, State: states[deliveryID]}); err != nil {
+		return errors.New("notification producer receipt unavailable")
+	}
+	return nil
+}
+func (s *Service) Recover(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	lookup, stop := context.WithTimeout(ctx, time.Second)
+	rows, lookupErr := s.Store.Due(lookup, s.now())
+	stop()
+	var joined sync.WaitGroup
+	var failures [2]error
+	if lookupErr == nil {
+		for group, kind := range []string{"otp", "normal"} {
+			joined.Add(1)
+			go func() {
+				defer joined.Done()
+				phase, stop := context.WithTimeout(ctx, 3*time.Second)
+				defer stop()
+				for _, row := range rows {
+					if row.Kind != kind {
+						continue
+					}
+					if phase.Err() != nil {
+						failures[group] = errors.Join(failures[group], phase.Err())
+						break
+					}
+					var err error
+					if row.State == "sending" || !row.Deadline.After(s.now()) || row.Attempts >= row.attemptLimit() {
+						// Classification never calls the provider or resets its attempt cap.
+						_, _, err = s.Store.Claim(phase, row.ID, s.now())
+						if errors.Is(err, ErrBusy) {
+							err = nil
+						}
+					} else {
+						err = s.enqueue(phase, row)
+					}
+					failures[group] = errors.Join(failures[group], err)
+				}
+			}()
 		}
 	}
-	return s.Store.Prune(ctx, s.now())
+	joined.Wait()
+	prune, stop := context.WithTimeout(ctx, time.Second)
+	defer stop()
+	return errors.Join(lookupErr, failures[0], failures[1], s.Store.Prune(prune, s.now()))
 }

@@ -1195,6 +1195,9 @@ func (s *Service) today() string {
 
 func (s *Service) notifyRequest(request *SupportCallRequest, event string, formerAssignees ...*SupportUser) {
 	if s.Outbox != nil {
+		if request == nil {
+			return
+		}
 		if request != nil {
 			callID := uint(0)
 			if request.Call != nil {
@@ -1202,7 +1205,13 @@ func (s *Service) notifyRequest(request *SupportCallRequest, event string, forme
 			}
 			_ = s.DB.Model(&SupportScheduleAuditLog{}).Where("notification_state = ? AND ((entity_type = ? AND entity_id = ?) OR (entity_type = ? AND entity_id = ?))", "pending", "support_request", request.ID, "support_call", callID).Update("notification_next_attempt", time.Now().UTC()).Error
 		}
-		_ = s.RecoverNotifications(requestscope.Context(s.DB))
+		callID := uint(0)
+		if request.Call != nil {
+			callID = request.Call.ID
+		}
+		_ = s.recoverNotifications(requestscope.Context(s.DB), func(query *gorm.DB) *gorm.DB {
+			return query.Where("((entity_type = ? AND entity_id = ?) OR (entity_type = ? AND entity_id = ?))", "support_request", request.ID, "support_call", callID)
+		})
 		return
 	}
 	if s.Mailer == nil || request == nil {
@@ -1251,7 +1260,13 @@ func (s *Service) notifyRequest(request *SupportCallRequest, event string, forme
 
 func (s *Service) notifyAssignmentChange(date, reason string) {
 	if s.Outbox != nil {
-		_ = s.RecoverNotifications(requestscope.Context(s.DB))
+		var assignment SupportAssignment
+		if s.DB.Where("assignment_date = ?", date).First(&assignment).Error != nil {
+			return
+		}
+		_ = s.recoverNotifications(requestscope.Context(s.DB), func(query *gorm.DB) *gorm.DB {
+			return query.Where("entity_type = ? AND entity_id = ?", "assignment", assignment.ID)
+		})
 		return
 	}
 	if s.Mailer == nil {

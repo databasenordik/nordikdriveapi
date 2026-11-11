@@ -32,6 +32,14 @@ func run() error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if len(os.Args) > 1 {
+		if len(os.Args) != 2 || os.Args[1] != "signup-cleanup" {
+			return errors.New("unknown server command")
+		}
+		// Maintenance never constructs the HTTP application or external providers,
+		// and does not need JWT, SMTP or verification-key secrets.
+		return runSignupCleanup(ctx, config.LoadConfig())
+	}
 	shutdownTracing, err := observability.Tracing(ctx)
 	if err != nil {
 		return err

@@ -15,6 +15,7 @@ import (
 	"gorm.io/gorm/clause"
 
 	"nordik-drive-api/internal/dataconfig"
+	"nordik-drive-api/internal/outbox"
 	"nordik-drive-api/internal/requestscope"
 )
 
@@ -141,6 +142,7 @@ func (FileRowLineage) TableName() string {
 
 type VersionReconciliationRunOptions struct {
 	MaxJobs int
+	JobID   *uint
 }
 
 type VersionReconciliationRunResult struct {
@@ -360,14 +362,18 @@ func (fs *FileService) enqueueVersionTransitionJob(tx *gorm.DB, fileID uint, fil
 		AvailableAt:         now,
 	}
 
-	return tx.Create(&job).Error
+	if err := tx.Create(&job).Error; err != nil {
+		return err
+	}
+	outbox.TrackFileVersion(tx.Statement.Context, job.ID)
+	return nil
 }
 
 func RunVersionReconciliationJobs(db *gorm.DB, options VersionReconciliationRunOptions) (*VersionReconciliationRunResult, error) {
 	if db == nil {
 		return nil, fmt.Errorf("db not initialized")
 	}
-	if err := recoverStaleVersionReconciliationJobs(db); err != nil {
+	if err := recoverStaleVersionReconciliationJobs(db, options.JobID); err != nil {
 		return nil, err
 	}
 
@@ -378,7 +384,7 @@ func RunVersionReconciliationJobs(db *gorm.DB, options VersionReconciliationRunO
 
 	result := &VersionReconciliationRunResult{}
 	for i := 0; i < maxJobs; i++ {
-		job, ok, err := claimNextVersionReconciliationJob(db)
+		job, ok, err := claimNextVersionReconciliationJob(db, options.JobID)
 		if err != nil {
 			return nil, err
 		}
@@ -409,12 +415,15 @@ func RunVersionReconciliationJobs(db *gorm.DB, options VersionReconciliationRunO
 	return result, nil
 }
 
-func recoverStaleVersionReconciliationJobs(db *gorm.DB) error {
+func recoverStaleVersionReconciliationJobs(db *gorm.DB, ids ...*uint) error {
 	staleBefore := time.Now().Add(-defaultVersionReconciliationLeaseTTL)
 
 	var processingJobs []FileVersionReconciliationJob
-	if err := db.
-		Where("status = ?", reconciliationJobStatusProcessing).
+	query := db.Where("status = ?", reconciliationJobStatusProcessing)
+	if len(ids) > 0 && ids[0] != nil {
+		query = query.Where("id = ?", *ids[0])
+	}
+	if err := query.
 		Order("id ASC").
 		Find(&processingJobs).Error; err != nil {
 		return err
@@ -493,14 +502,17 @@ func recoverStaleVersionReconciliationJob(db *gorm.DB, staleJob *FileVersionReco
 	})
 }
 
-func claimNextVersionReconciliationJob(db *gorm.DB) (*FileVersionReconciliationJob, bool, error) {
+func claimNextVersionReconciliationJob(db *gorm.DB, ids ...*uint) (*FileVersionReconciliationJob, bool, error) {
 	now := time.Now()
 	var claimed *FileVersionReconciliationJob
 
 	err := db.Transaction(func(tx *gorm.DB) error {
 		var candidate FileVersionReconciliationJob
-		err := tx.
-			Where("status = ? AND available_at <= ?", reconciliationJobStatusPending, now).
+		query := tx.Where("status = ? AND available_at <= ?", reconciliationJobStatusPending, now)
+		if len(ids) > 0 && ids[0] != nil {
+			query = query.Where("id = ?", *ids[0])
+		}
+		err := query.
 			Order("available_at ASC, id ASC").
 			First(&candidate).Error
 		if err != nil {

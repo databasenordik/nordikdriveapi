@@ -37,4 +37,4 @@ func Registry(db *gorm.DB, mail mailer.EmailSender, honour HonourRunner, support
 	}
 }
 
-var Schedules = map[string]string{"file-review-email": "*/5 * * * *", "form-review-email": "*/5 * * * *", "file-normalization": "*/10 * * * *", "file-reconciliation": "* * * * *", "daily-honour": "0 0 * * *", "support-maintenance": "0 0 * * *"}
+var Schedules = map[string]string{"file-review-email": "5 */12 * * *", "form-review-email": "10 */12 * * *", "file-normalization": "15 */6 * * *", "file-reconciliation": "20 */12 * * *", "daily-honour": "0 0 * * *", "support-maintenance": "0 0 * * *"}

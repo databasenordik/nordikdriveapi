@@ -377,16 +377,19 @@ class Runtime:
         retired=window["previous_revision"]
         label=r.application_name(retired)
         inspection=self.fetch(f"https://nordikdriveapi-worker-724838782318.{r.REGION}.run.app/internal/v1/rollout/connections",os.environ.get("WORKER_INSPECTION_ID_TOKEN",""))
-        if inspection.get("version")!=2 or not isinstance(inspection.get("sessions"),list) or not inspection.get("observed_at"):
-            raise r.Refused("Complete timestamped SQL aggregates are required")
+        validate_inspection(inspection)
         sessions=sum(int(item["count"]) for item in inspection["sessions"] if item.get("application")==label)
         unlabelled=sum(int(item["count"]) for item in inspection["sessions"] if item.get("owner")==window["target"] and not item.get("application","").startswith("run:"))
         now=dt.datetime.now(dt.timezone.utc)
+        evidence={"revision":retired,"application":label,"sql_observed":True,"sql_sessions":sessions,"sql_observed_at":inspection["observed_at"],"unlabelled_observed":True,"unlabelled_sessions":unlabelled}
+        revision_name=name(window["target"])+"/revisions/"+retired
+        try:retirement=r.retired_revision(self.api.get(revision_name),revision_name,now)
+        except r.Refused:pass
+        else:return {**evidence,"retirement":retirement}
         filters=f'metric.type="run.googleapis.com/container/instance_count" AND resource.type="cloud_run_revision" AND resource.labels.service_name="{r.SERVICES[window["target"]]}" AND resource.labels.revision_name="{retired}"'
         query=urllib.parse.urlencode({"filter":filters,"interval.startTime":(now-dt.timedelta(minutes=10)).isoformat(),"interval.endTime":now.isoformat(),"view":"FULL","pageSize":"100"})
         payload=self.fetch(f"https://monitoring.googleapis.com/v3/projects/{r.PROJECT}/timeSeries?"+query,os.environ.get("GOOGLE_OAUTH_ACCESS_TOKEN",""))
-        evidence={"revision":retired,"application":label,"sql_observed":True,"sql_sessions":sessions,"sql_observed_at":inspection["observed_at"],"unlabelled_observed":True,"unlabelled_sessions":unlabelled,**instance_points(payload,r.SERVICES[window["target"]],retired)}
-        return evidence
+        return {**evidence,**instance_points(payload,r.SERVICES[window["target"]],retired)}
 
 
 def main():

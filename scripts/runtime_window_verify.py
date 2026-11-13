@@ -41,6 +41,7 @@ def inspection(runtime,target,window):
 
 def verify(runtime,target,token,operation,*,timeout=1200):
     _,window=prepare(runtime,target,token,operation)
+    result={"target":target,"operation":operation,"revision":window["revision"],"verified":True}
     if operation=="test":
         if target!="worker":inspection(runtime,target,window)
         runtime.test(token)
@@ -48,13 +49,15 @@ def verify(runtime,target,token,operation,*,timeout=1200):
         deadline=time.monotonic()+timeout
         while True:
             try:
-                runtime.coordinator.release(token,runtime.observe_drain(token))
+                evidence=runtime.observe_drain(token)
+                runtime.coordinator.release(token,evidence)
+                result["drain_evidence"]=evidence
                 break
             except r.Refused:
                 if time.monotonic()>=deadline:raise r.Refused("Explicit drain not established; persistent window remains blocked") from None
                 print("Waiting for explicit SQL and active/idle instance drain evidence",flush=True)
                 time.sleep(30)
-    return {"target":target,"operation":operation,"revision":window["revision"],"verified":True}
+    return result
 
 
 def main():

@@ -105,6 +105,31 @@ def untouched(before, after):
             raise Refused("Metadata update changed an unrelated annotation")
 
 
+def retired_revision(revision, expected_name, now):
+    """Positive control-plane evidence, never an inference from absent metrics."""
+    if revision.get("name") != expected_name or not revision.get("uid") or revision.get("reconciling") or revision.get("deleteTime"):
+        raise Refused("Exact non-reconciling retired revision is required")
+    generation = revision.get("generation")
+    if not generation or str(generation) != str(revision.get("observedGeneration")):
+        raise Refused("Revision retirement generation is not observed")
+    conditions = revision.get("conditions", [])
+    expected = {"Ready": "CONDITION_SUCCEEDED", "Active": "CONDITION_FAILED", "ResourcesAvailable": "CONDITION_RECONCILING"}
+    selected = {}
+    for kind, state in expected.items():
+        values = [item for item in conditions if item.get("type") == kind]
+        if len(values) != 1 or values[0].get("state") != state or values[0].get("revisionReason") != "RETIRED":
+            raise Refused("Cloud Run has not explicitly retired revision infrastructure")
+        try:
+            transitioned = dt.datetime.fromisoformat(values[0]["lastTransitionTime"].replace("Z", "+00:00"))
+            if transitioned.tzinfo is None or transitioned > now:
+                raise ValueError
+        except (ValueError, KeyError, TypeError, AttributeError):
+            raise Refused("Valid retirement condition timestamps are required") from None
+        selected[kind] = {key: values[0][key] for key in ("state", "revisionReason", "lastTransitionTime")}
+    return {"source": "cloud-run-admin-retired", "revision": expected_name, "uid": revision["uid"],
+            "generation": str(generation), "conditions": selected, "observed_at": now.isoformat()}
+
+
 class Coordinator:
     def __init__(self, api, now=None):
         self.api = api
@@ -207,7 +232,29 @@ class Coordinator:
             raise Refused("Timestamped PostgreSQL/promotion evidence required") from None
         if not 0 <= (self.now()-sql_time).total_seconds() <= 30 or sql_time < promoted:
             raise Refused("PostgreSQL evidence is stale or precedes promotion")
-        for state in ("active", "idle"):
+        if "retirement" in evidence:
+            if "active" in evidence or "idle" in evidence:
+                raise Refused("Do not combine retirement status with synthesized instance counts")
+            resource = f"projects/{PROJECT}/locations/{REGION}/services/{SERVICES[value['target']]}"
+            service = self.api.get(resource)
+            retired = value["previous_revision"]
+            serving = [item for item in service.get("trafficStatuses", []) if item.get("percent", 0) > 0]
+            if service.get("uid") != value.get("service_uid") or len(serving) != 1 or serving[0].get("percent") != 100 or serving[0].get("revision", "").rsplit("/", 1)[-1] != value["revision"]:
+                raise Refused("Serving runtime changed before retirement acceptance")
+            if any(item.get("revision", "").rsplit("/", 1)[-1] == retired for item in service.get("traffic", []) + service.get("trafficStatuses", [])):
+                raise Refused("Retired revision still has a traffic or tag reference")
+            revision_name = resource + "/revisions/" + retired
+            live = retired_revision(self.api.get(revision_name), revision_name, self.now())
+            proof = evidence["retirement"]
+            if not isinstance(proof, dict) or any(proof.get(key) != live[key] for key in ("source", "revision", "uid", "generation", "conditions")):
+                raise Refused("Retirement evidence differs from the live control plane")
+            try:
+                observed = dt.datetime.fromisoformat(proof["observed_at"].replace("Z", "+00:00"))
+                if not 0 <= (self.now() - observed).total_seconds() <= 30 or observed < promoted:
+                    raise ValueError
+            except (ValueError, KeyError, TypeError, AttributeError):
+                raise Refused("Retirement evidence is stale or precedes promotion") from None
+        for state in (() if "retirement" in evidence else ("active", "idle")):
             point = evidence.get(state)
             if not isinstance(point, dict) or point.get("count") != 0:
                 raise Refused("Missing/nonzero Cloud Run " + state + " evidence")

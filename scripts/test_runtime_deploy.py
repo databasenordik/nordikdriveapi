@@ -55,6 +55,62 @@ class RuntimeTests(unittest.TestCase):
         if "/rollout/connections" in url:return {"version":2,"sessions":[{"application":"run:another","state":"active","owner":"external","count":5}],"observed_at":self.now.isoformat()}
         return metrics("nordikdriveapi-worker-old",self.now)
     def staged(self):return self.runtime.stage("worker",IMAGE,"github/run/123")
+    def retired(self):
+        revision=d.name("worker")+"/revisions/nordikdriveapi-worker-old"
+        resource=self.api.revisions[revision]
+        resource.update(name=revision,uid="retired-worker-uid",generation="1",observedGeneration="1",conditions=[
+            {"type":kind,"state":state,"revisionReason":"RETIRED","lastTransitionTime":self.now.isoformat()}
+            for kind,state in (("Ready","CONDITION_SUCCEEDED"),("Active","CONDITION_FAILED"),("ResourcesAvailable","CONDITION_RECONCILING"))])
+        self.coordinator.now=lambda:dt.datetime.now(dt.timezone.utc)
+        return resource
+    def test_retired_infrastructure_is_positive_evidence_without_synthesized_counts(self):
+        value=self.staged();self.runtime.test(value["token"]);self.runtime.promote(value["token"])
+        self.retired()
+        evidence=self.runtime.observe_drain(value["token"])
+        self.assertEqual(evidence["retirement"]["source"],"cloud-run-admin-retired")
+        self.assertNotIn("active",evidence);self.assertNotIn("idle",evidence)
+        self.assertFalse(any(url.startswith("https://monitoring.") for url,_ in self.fetches))
+        self.coordinator.release(value["token"],evidence)
+        self.assertEqual(r.marker(self.api.get(r.GATEWAY))["state"],"idle")
+    def test_retirement_never_bypasses_sql_or_current_evidence(self):
+        for edit in (lambda e:e.update(sql_sessions=1),lambda e:e.update(sql_observed=False),
+                     lambda e:e.update(sql_observed_at=(self.now-dt.timedelta(minutes=1)).isoformat()),
+                     lambda e:e.update(active={"count":0}),lambda e:e["retirement"].update(uid="wrong"),
+                     lambda e:e["retirement"].update(observed_at=(self.now-dt.timedelta(minutes=1)).isoformat()),
+                     lambda e:e["retirement"].update(observed_at=(self.now+dt.timedelta(minutes=1)).isoformat())):
+            with self.subTest(edit=edit):
+                self.setUp();value=self.staged();self.runtime.test(value["token"]);self.runtime.promote(value["token"]);self.retired()
+                evidence=self.runtime.observe_drain(value["token"]);edit(evidence)
+                with self.assertRaises(r.Refused):self.coordinator.release(value["token"],evidence)
+                self.assertEqual(r.marker(self.api.get(r.GATEWAY))["state"],"promoted")
+    def test_retirement_is_reread_and_cannot_hide_reactivation_or_routes(self):
+        for edit in (lambda old:old.update(reconciling=True),lambda old:old.update(uid="recreated"),
+                     lambda old:old["conditions"][1].update(revisionReason="RECREATING"),
+                     lambda old:self.api.resources[d.name("worker")]["traffic"].append({"revision":"nordikdriveapi-worker-old","tag":"still-reachable"}),
+                     lambda old:self.api.resources[d.name("worker")].update(uid="changed-service")):
+            with self.subTest(edit=edit):
+                self.setUp();value=self.staged();self.runtime.test(value["token"]);self.runtime.promote(value["token"]);old=self.retired()
+                evidence=self.runtime.observe_drain(value["token"]);edit(old)
+                with self.assertRaises(r.Refused):self.coordinator.release(value["token"],evidence)
+                self.assertEqual(r.marker(self.api.get(r.GATEWAY))["state"],"promoted")
+    def test_retirement_requires_exact_fully_observed_conditions(self):
+        good=self.retired();name=good["name"]
+        for edit in (lambda v:v.update(name="wrong"),lambda v:v.update(uid=""),lambda v:v.update(reconciling=True),
+                     lambda v:v.update(deleteTime=self.now.isoformat()),lambda v:v.update(observedGeneration="0"),lambda v:v.update(generation=""),
+                     lambda v:v["conditions"].pop(),lambda v:v["conditions"].append(copy.deepcopy(v["conditions"][0])),
+                     lambda v:v["conditions"][1].update(state="CONDITION_SUCCEEDED"),lambda v:v["conditions"][0].update(revisionReason="RETIRING"),
+                     lambda v:v["conditions"][0].update(lastTransitionTime=None),lambda v:v["conditions"][0].update(lastTransitionTime="invalid"),
+                     lambda v:v["conditions"][0].update(lastTransitionTime=(self.now+dt.timedelta(minutes=1)).isoformat()),
+                     lambda v:v["conditions"][0].update(lastTransitionTime="2026-11-12T00:00:00")):
+            with self.subTest(edit=edit):
+                value=copy.deepcopy(good);edit(value)
+                with self.assertRaises(r.Refused):r.retired_revision(value,name,self.now)
+    def test_absent_metrics_without_positive_retirement_still_block(self):
+        value=self.staged();self.runtime.test(value["token"]);self.runtime.promote(value["token"])
+        fetch=self.runtime.fetch
+        self.runtime.fetch=lambda url,token,raw=False: {} if url.startswith("https://monitoring.") else fetch(url,token,raw)
+        with self.assertRaises(r.Refused):self.runtime.observe_drain(value["token"])
+        self.assertEqual(r.marker(self.api.get(r.GATEWAY))["state"],"promoted")
     def test_stage_preserves_serving_revision_and_unrelated_configuration(self):
         before=self.api.get(d.name("worker"));result=self.staged();after=self.api.get(d.name("worker"))
         self.assertEqual(d.serving_revision(after),d.serving_revision(before))

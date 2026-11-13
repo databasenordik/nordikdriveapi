@@ -45,6 +45,20 @@ func (c Credentials) GetRequestMetadata(ctx context.Context, _ ...string) (map[s
 }
 func (Credentials) RequireTransportSecurity() bool { return true }
 
+// SignedCredentials preserves the signed original for service-level validation
+// while Cloud Run consumes the separate platform authentication header.
+type SignedCredentials struct{ Source oauth2.TokenSource }
+
+func (c SignedCredentials) GetRequestMetadata(ctx context.Context, uri ...string) (map[string]string, error) {
+	headers, err := (Credentials{Source: c.Source}).GetRequestMetadata(ctx, uri...)
+	if err != nil {
+		return nil, err
+	}
+	headers["authorization"] = headers["x-serverless-authorization"]
+	return headers, nil
+}
+func (SignedCredentials) RequireTransportSecurity() bool { return true }
+
 // Verify checks the original signed token, never Cloud Run's signature-stripped
 // X-Serverless-Authorization header. Only explicit service accounts are admitted.
 func Verify(ctx context.Context, encoded, audience string, accounts map[string]bool) error {

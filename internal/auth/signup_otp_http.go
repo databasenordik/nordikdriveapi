@@ -81,5 +81,6 @@ func (s *AuthService) CreateVerifiedUser(user Auth, proof, key string, request a
 	}
 	copy := *s.Signup
 	copy.DB = s.DB
+	copy.Audit = s.Audit
 	return copy.Create(requestscope.Context(s.DB), user, proof, key, request)
 }

@@ -13,6 +13,7 @@ import (
 
 	"nordik-drive-api/config"
 	"nordik-drive-api/internal/admin"
+	"nordik-drive-api/internal/auditoutbox"
 	"nordik-drive-api/internal/auth"
 	"nordik-drive-api/internal/chat"
 	"nordik-drive-api/internal/community"
@@ -20,6 +21,7 @@ import (
 	"nordik-drive-api/internal/file"
 	"nordik-drive-api/internal/formsubmission"
 	"nordik-drive-api/internal/honour"
+	"nordik-drive-api/internal/identityclient"
 	"nordik-drive-api/internal/logocontent"
 	"nordik-drive-api/internal/logs"
 	"nordik-drive-api/internal/lookup"
@@ -42,6 +44,16 @@ type application struct {
 
 func newApplication(cfg config.Config, dependencies *runtimeDependencies) (*application, error) {
 	db := dependencies.DB
+	directory, closeDirectory, err := identityclient.Configured(requestscope.Context(db))
+	if err != nil {
+		return nil, err
+	}
+	assembled := false
+	defer func() {
+		if !assembled {
+			closeDirectory()
+		}
+	}()
 	r := gin.New()
 	r.Use(observability.Middleware())
 	r.GET("/healthz", func(c *gin.Context) { c.Status(200) })
@@ -56,6 +68,21 @@ func newApplication(cfg config.Config, dependencies *runtimeDependencies) (*appl
 	}))
 
 	writer, remote, err := outbox.Configure(requestscope.Context(db))
+	if err != nil {
+		return nil, err
+	}
+	auditWriter, err := auditoutbox.Configure(requestscope.Context(db), "legacy")
+	if err != nil {
+		return nil, err
+	}
+	if err := auditoutbox.RegisterOwner(r, db, auditWriter, os.Getenv("AUDIT_OWNER_URL")); err != nil {
+		return nil, err
+	}
+	identityDisabled, err := runtimeFlag("LEGACY_IDENTITY_PUBLIC_DISABLED")
+	if err != nil {
+		return nil, err
+	}
+	auditDisabled, err := runtimeFlag("LEGACY_AUDIT_PUBLIC_DISABLED")
 	if err != nil {
 		return nil, err
 	}
@@ -98,43 +125,52 @@ func newApplication(cfg config.Config, dependencies *runtimeDependencies) (*appl
 		)
 	}
 
-	logService := &logs.LogService{DB: db}
-	userService := &auth.AuthService{DB: db, CFG: &cfg, Mailer: mailerService}
-	userService.Outbox = writer
-	if flag := os.Getenv("SIGNUP_REQUIRE_VERIFIED_EMAIL"); flag != "" {
-		userService.RequireVerified, err = strconv.ParseBool(flag)
-		if err != nil {
-			return nil, errors.New("SIGNUP_REQUIRE_VERIFIED_EMAIL must be a boolean")
+	logService := &logs.LogService{DB: db, Directory: directory}
+	if !identityDisabled {
+		userService := &auth.AuthService{DB: db, CFG: &cfg, Mailer: mailerService}
+		userService.Outbox = writer
+		if flag := os.Getenv("SIGNUP_REQUIRE_VERIFIED_EMAIL"); flag != "" {
+			userService.RequireVerified, err = strconv.ParseBool(flag)
+			if err != nil {
+				return nil, errors.New("SIGNUP_REQUIRE_VERIFIED_EMAIL must be a boolean")
+			}
 		}
-	}
-	if writer != nil && os.Getenv("SIGNUP_VERIFICATION_KEYS") != "" {
-		userService.Signup, err = auth.NewSignupVerifier(db, writer, os.Getenv("SIGNUP_VERIFICATION_KEYS"), os.Getenv("SIGNUP_VERIFICATION_KEY_VERSION"))
-		if err != nil {
-			return nil, err
+		if writer != nil && os.Getenv("SIGNUP_VERIFICATION_KEYS") != "" {
+			userService.Signup, err = auth.NewSignupVerifier(db, writer, os.Getenv("SIGNUP_VERIFICATION_KEYS"), os.Getenv("SIGNUP_VERIFICATION_KEY_VERSION"))
+			if err != nil {
+				return nil, err
+			}
+			userService.Signup.Remote = remote
 		}
-		userService.Signup.Remote = remote
+		if userService.RequireVerified && userService.Signup == nil {
+			return nil, errors.New("mandatory signup verification is not configured")
+		}
+		auth.RegisterRoutes(r, userService, logService)
 	}
-	if userService.RequireVerified && userService.Signup == nil {
-		return nil, errors.New("mandatory signup verification is not configured")
-	}
-	auth.RegisterRoutes(r, userService, logService)
 
-	fileService := &file.FileService{DB: db, Mailer: mailerService}
+	fileService := &file.FileService{DB: db, Mailer: mailerService, Directory: directory}
 	fileService.Outbox = writer
-	file.RegisterRoutes(r, fileService, logService)
+	fileService.Audit = auditWriter
+	file.RegisterRoutes(r, fileService, &logs.LogService{DB: db, Directory: directory, Audit: auditWriter})
 
 	roleService := &role.RoleService{DB: db}
-	role.RegisterRoutes(r, roleService)
+	if !identityDisabled {
+		role.RegisterRoutes(r, roleService)
+	}
 
-	logs.RegisterRoutes(r, logService)
+	if !auditDisabled {
+		logs.RegisterRoutes(r, logService)
+	}
 
 	communityService := &community.CommunityService{DB: db}
-	community.RegisterRoutes(r, communityService)
+	if !identityDisabled {
+		community.RegisterRoutes(r, communityService)
+	}
 
 	configService := &dataconfig.DataConfigService{DB: db}
 	dataconfig.RegisterRoutes(r, configService)
 
-	formSubmissionService := &formsubmission.FormSubmissionService{DB: db, Mailer: mailerService}
+	formSubmissionService := &formsubmission.FormSubmissionService{DB: db, Mailer: mailerService, Directory: directory}
 	formSubmissionService.Outbox = writer
 	formsubmission.RegisterRoutes(r, formSubmissionService)
 
@@ -142,6 +178,7 @@ func newApplication(cfg config.Config, dependencies *runtimeDependencies) (*appl
 		DB:                     db,
 		Mailer:                 mailerService,
 		NotificationRecipients: cfg.SupportRequestNotificationEmails,
+		Directory:              directory,
 	}
 	supportrequest.RegisterRoutes(r, supportRequestService)
 	supportRequestService.Outbox = writer
@@ -156,7 +193,7 @@ func newApplication(cfg config.Config, dependencies *runtimeDependencies) (*appl
 		}
 		meetingProvider = zoomProvider
 	}
-	supportScheduleService := &supportschedule.Service{DB: db, Mailer: mailerService, MeetingProvider: meetingProvider}
+	supportScheduleService := &supportschedule.Service{DB: db, Mailer: mailerService, MeetingProvider: meetingProvider, Directory: directory}
 	supportScheduleService.Outbox = writer
 	supportschedule.RegisterRoutes(r, supportScheduleService)
 
@@ -178,8 +215,26 @@ func newApplication(cfg config.Config, dependencies *runtimeDependencies) (*appl
 	honourService.Location = appLocation
 	honour.RegisterRoutes(r, honourService)
 
-	adminService := &admin.AdminService{DB: db}
+	adminService := &admin.AdminService{DB: db, Directory: directory}
 	admin.RegisterRoutes(r, adminService)
 
-	return &application{Router: r, Mailer: mailerService, Honour: honourService, Support: supportScheduleService, Close: closeChatBackend}, nil
+	assembled = true
+	return &application{Router: r, Mailer: mailerService, Honour: honourService, Support: supportScheduleService, Close: func() {
+		if closeChatBackend != nil {
+			closeChatBackend()
+		}
+		closeDirectory()
+	}}, nil
+}
+
+func runtimeFlag(name string) (bool, error) {
+	raw := os.Getenv(name)
+	if raw == "" {
+		return false, nil
+	}
+	value, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false, errors.New(name + " must be a boolean")
+	}
+	return value, nil
 }

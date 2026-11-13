@@ -73,8 +73,10 @@ type AdminSearchResponse struct {
 
 // ✅ CHANGES now returns request rows (not details rows)
 type AdminChangeRow struct {
-	RequestID uint   `json:"request_id"`
-	Status    string `json:"status"`
+	RequestedByID *uint  `json:"-" gorm:"column:requested_by_id"`
+	ReviewedByID  *uint  `json:"-" gorm:"column:reviewed_by_id"`
+	RequestID     uint   `json:"request_id"`
+	Status        string `json:"status"`
 
 	FileID   uint   `json:"file_id"`
 	FileName string `json:"file_name"`

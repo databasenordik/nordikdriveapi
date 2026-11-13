@@ -1,4 +1,4 @@
-name: Stage one development runtime revision
+name: Deploy one coordinated development runtime
 on:
   workflow_call:
     inputs:
@@ -8,30 +8,28 @@ on:
     inputs:
       target:
         type: choice
-        options: [monolith, worker, gateway-adapter, notifications]
+        options: [monolith, worker, gateway-adapter, notifications, identity, audit]
         required: true
       image:
-        description: Immutable image URI ending in @sha256:digest
+        description: Reviewed immutable image URI ending in @sha256:digest
         type: string
         required: true
 permissions:
   contents: read
   id-token: write
 concurrency:
-  group: runtime-deploy-${{ inputs.target }}
+  group: nordik-development-runtime
+  queue: max
   cancel-in-progress: false
 jobs:
   deploy:
     if: github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     environment: development
     env:
-      TARGET: ${{ inputs.target }}
+      INPUT_TARGET: ${{ inputs.target }}
       IMAGE: ${{ inputs.image }}
-      LEGACY_SERVICE: ${{ vars.LEGACY_CLOUD_RUN_SERVICE || 'nordikdriveapi-legacy' }}
-      WORKER_SERVICE: ${{ vars.WORKER_CLOUD_RUN_SERVICE || 'nordikdriveapi-worker' }}
-      GATEWAY_SERVICE: ${{ vars.GATEWAY_CLOUD_RUN_SERVICE || 'nordikdriveapi' }}
-      NOTIFICATIONS_SERVICE: ${{ vars.NOTIFICATIONS_CLOUD_RUN_SERVICE || 'nordikdriveapi-notifications' }}
     steps:
       - uses: actions/checkout@v4
       - id: auth
@@ -41,46 +39,73 @@ jobs:
           service_account: github-nordik-drive-deployer@planar-ray-472112-e8.iam.gserviceaccount.com
           token_format: access_token
           create_credentials_file: false
-      - uses: google-github-actions/setup-gcloud@v2
-      - name: Create revision without moving traffic
-        shell: bash
+      - id: prepare
+        name: Verify coordination and deployment target
         env:
-          CLOUDSDK_AUTH_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
         run: |
-          set -euo pipefail
-          [[ "$IMAGE" =~ ^us-west1-docker.pkg.dev/planar-ray-472112-e8/nordikdriveapi/[a-zA-Z0-9_-]+@sha256:[a-f0-9]{64}$ ]]
-          container=()
-          case "$TARGET" in
-            monolith)
-              service="$LEGACY_SERVICE"
-              [[ "$service" == nordikdriveapi-legacy ]]
-              [[ "$IMAGE" == */nordik_drive_go@sha256:* ]]
-              ;;
-            worker)
-              service="$WORKER_SERVICE"
-              [[ "$service" == nordikdriveapi-worker ]]
-              [[ "$IMAGE" == */nordik_worker_go@sha256:* ]]
-              ;;
-            notifications)
-              service="$NOTIFICATIONS_SERVICE"
-              [[ "$service" == nordikdriveapi-notifications ]]
-              [[ "$IMAGE" == */nordik_notifications_go@sha256:* ]]
-              ;;
-            gateway-adapter)
-              service="$GATEWAY_SERVICE"
-              [[ "$service" == nordikdriveapi-gateway || "$service" == nordikdriveapi ]]
-              [[ "$IMAGE" == */nordik_gateway_go@sha256:* ]]
-              container=(--container authorization)
-              ;;
-            *) exit 1 ;;
-          esac
-          test -n "$service"
-          if [[ "$TARGET" == notifications ]]; then
-            existing=$(gcloud run services list --project planar-ray-472112-e8 --region us-west1 --filter="metadata.name=$service" --format='value(metadata.name)')
-            if [[ -z "$existing" ]]; then
-              echo "Notifications image published. Provision the reviewed Terraform resources before staging its first revision." >> "$GITHUB_STEP_SUMMARY"
-              exit 0
-            fi
-          fi
-          # Service flags precede --container; image belongs to that container.
-          gcloud run services update "$service" --project planar-ray-472112-e8 --region us-west1 --no-traffic "${container[@]}" --image "$IMAGE"
+          python3 - <<'PY'
+          import os,sys
+          sys.path.insert(0,'scripts')
+          import runtime_rollout as r
+          import runtime_deploy as d
+          target={'monolith':'legacy','worker':'worker','gateway-adapter':'gateway','notifications':'notifications','identity':'identity','audit':'audit'}.get(os.environ['INPUT_TARGET'])
+          if target is None:raise SystemExit('Unsupported development target')
+          image=os.environ['IMAGE']
+          if not image.startswith('us-west1-docker.pkg.dev/'+r.PROJECT+'/nordikdriveapi/'+r.IMAGES[target]+'@sha256:') or len(image.rsplit('@sha256:',1)[-1])!=64:
+              raise SystemExit('The selected service requires its reviewed immutable digest')
+          api=r.API()
+          value=r.marker(api.get(r.GATEWAY))
+          ready=False
+          if value is None:
+              reason='Image published. Complete the reviewed coordination foundation before creating a runtime revision.'
+          elif not value.get('verified') or value.get('state')!='idle':
+              raise SystemExit('Another or interrupted rollout is blocking runtime changes; inspect explicit recovery.')
+          else:
+              try:current=api.get(d.name(target))
+              except r.Refused as error:
+                  if str(error)!='Cloud Run request failed HTTP 404':raise
+                  reason='Image published. Provision and accept this private service through its reviewed Terraform window first.'
+              else:
+                  ready=True
+                  reason='Persistent coordination is ready.'
+          with open(os.environ['GITHUB_OUTPUT'],'a',encoding='utf-8') as output:
+              output.write('ready='+str(ready).lower()+'\ntarget='+target+'\n')
+              if ready:output.write('audience='+current['uri']+'\n')
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a',encoding='utf-8') as output:output.write(reason+'\n')
+          PY
+      - id: runtime_token
+        if: steps.prepare.outputs.ready == 'true'
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: projects/724838782318/locations/global/workloadIdentityPools/github-pool-api/providers/github-provider-api
+          service_account: github-nordik-drive-deployer@planar-ray-472112-e8.iam.gserviceaccount.com
+          token_format: id_token
+          id_token_audience: ${{ steps.prepare.outputs.audience }}
+          id_token_include_email: true
+          create_credentials_file: false
+      - id: inspection_token
+        if: steps.prepare.outputs.ready == 'true'
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: projects/724838782318/locations/global/workloadIdentityPools/github-pool-api/providers/github-provider-api
+          service_account: github-nordik-drive-deployer@planar-ray-472112-e8.iam.gserviceaccount.com
+          token_format: id_token
+          id_token_audience: https://nordikdriveapi-worker-724838782318.us-west1.run.app
+          id_token_include_email: true
+          create_credentials_file: false
+      - name: Stage, test, promote and observe complete drain
+        if: steps.prepare.outputs.ready == 'true'
+        env:
+          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+          RUNTIME_ID_TOKEN: ${{ steps.runtime_token.outputs.id_token }}
+          WORKER_INSPECTION_ID_TOKEN: ${{ steps.inspection_token.outputs.id_token }}
+          TARGET: ${{ steps.prepare.outputs.target }}
+        run: |
+          python3 scripts/runtime_deploy.py deploy --target "$TARGET" --image "$IMAGE" --owner "github:${{ github.repository }}/actions/runs/${{ github.run_id }}" --output "$RUNNER_TEMP/runtime-window.json" --drain-timeout 1200
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.prepare.outputs.ready == 'true'
+        with:
+          name: runtime-window-${{ inputs.target }}
+          path: ${{ runner.temp }}/runtime-window.json
+          if-no-files-found: ignore

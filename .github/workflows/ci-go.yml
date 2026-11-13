@@ -28,10 +28,15 @@ jobs:
           go build -o "$RUNNER_TEMP/nordik-gateway" ./cmd/gateway
           go build -o "$RUNNER_TEMP/nordik-worker" ./cmd/worker
           go build -o "$RUNNER_TEMP/nordik-notifications" ./cmd/notifications
+          go build -o "$RUNNER_TEMP/nordik-identity" ./cmd/identity
+          go build -o "$RUNNER_TEMP/nordik-audit" ./cmd/audit
           go vet ./...
 
+      - name: Reproducible Identity RPC contract
+        run: bash scripts/check-identity-contract.sh
+
       - name: Race checks for concurrent platform boundaries
-        run: go test -race ./internal/gateway ./internal/circuit ./internal/jobs ./internal/database ./internal/requestscope ./internal/mailer ./internal/workload ./internal/observability ./internal/chat ./internal/auth ./internal/notifications ./internal/notificationcontract ./internal/outbox
+        run: go test -race ./internal/gateway ./internal/circuit ./internal/jobs ./internal/database ./internal/requestscope ./internal/mailer ./internal/workload ./internal/observability ./internal/chat ./internal/auth ./internal/notifications ./internal/notificationcontract ./internal/outbox ./internal/identity ./internal/identityapp ./internal/identityclient ./internal/activity ./internal/audit ./internal/auditapp ./internal/auditoutbox ./internal/audittransport ./internal/supportschedule ./internal/workerapp ./cmd/identity ./cmd/audit
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -95,6 +100,10 @@ jobs:
         run: python3 -m unittest discover -s scripts -p 'test_milestone2_*.py'
       - name: Independent service release selection
         run: python3 -m unittest discover -s scripts -p 'test_changed_services.py'
+      - name: Serialized runtime deployment and interrupted recovery
+        run: python3 -m unittest discover -s scripts -p 'test_runtime_*.py'
+      - name: Runtime Terraform plan scope
+        run: python3 -m unittest discover -s scripts -p 'test_check_runtime_plan.py'
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.13.5
@@ -111,4 +120,6 @@ jobs:
       - run: terraform test -filter=tests/rollout.tftest.hcl
         working-directory: infra/terraform
       - run: terraform test -filter=tests/notifications.tftest.hcl
+        working-directory: infra/terraform
+      - run: terraform test -filter=tests/identity_audit.tftest.hcl
         working-directory: infra/terraform

@@ -3,6 +3,8 @@
     "legacy": {"entrypoint":"./cmd/server","dockerfile":"cmd/server/Dockerfile","image":"nordik_drive_go","target":"monolith"},
     "worker": {"entrypoint":"./cmd/worker","dockerfile":"cmd/worker/Dockerfile","image":"nordik_worker_go","target":"worker"},
     "gateway": {"entrypoint":"./cmd/gateway","dockerfile":"cmd/gateway/Dockerfile","image":"nordik_gateway_go","target":"gateway-adapter"},
-    "notifications": {"entrypoint":"./cmd/notifications","dockerfile":"cmd/notifications/Dockerfile","image":"nordik_notifications_go","target":"notifications"}
+    "notifications": {"entrypoint":"./cmd/notifications","dockerfile":"cmd/notifications/Dockerfile","image":"nordik_notifications_go","target":"notifications"},
+    "identity": {"entrypoint":"./cmd/identity","dockerfile":"cmd/identity/Dockerfile","image":"nordik_identity_go","target":"identity"},
+    "audit": {"entrypoint":"./cmd/audit","dockerfile":"cmd/audit/Dockerfile","image":"nordik_audit_go","target":"audit"}
   }
 }

@@ -24,6 +24,12 @@ def main():
             blocks[location] = [statements, executions > 0]
 
     groups = {
+        "identity runtime": lambda path: any(folder in path for folder in (
+            "/internal/identity/", "/internal/identityapp/", "/internal/identityclient/", "/cmd/identity/"
+        )),
+        "audit runtime": lambda path: any(folder in path for folder in (
+            "/internal/activity/", "/internal/audit/", "/internal/auditapp/", "/internal/auditoutbox/", "/internal/audittransport/", "/cmd/audit/"
+        )),
         "gateway library": lambda path: "/internal/gateway/" in path,
         "notifications service": lambda path: "/internal/notifications/" in path,
         "new worker core": lambda path: any(

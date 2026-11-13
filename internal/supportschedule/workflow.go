@@ -59,10 +59,13 @@ func (s *Service) ListAvailability(date string, duration int, requestedStaffID *
 		staffID, response.AssignedStaff = *requestedStaffID, staff
 	} else {
 		var assignment SupportAssignment
-		if err := s.DB.Preload("PrimaryAssignee").Where("assignment_date = ?", date).First(&assignment).Error; err != nil {
+		if err := s.DB.Scopes(s.userPreload("PrimaryAssignee")).Where("assignment_date = ?", date).First(&assignment).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return response, nil
 			}
+			return nil, err
+		}
+		if err := s.hydrate(s.DB, primaryAssignmentTargets(&assignment)); err != nil {
 			return nil, err
 		}
 		if assignment.PrimaryAssigneeID == nil {
@@ -138,7 +141,10 @@ func (s *Service) ListCalendar(actorID uint, duration int, requestedStaffID *uin
 	from := scheduleDateFor(s.now(), loc)
 	to := scheduleDateFor(s.now().In(loc).AddDate(0, 0, DefaultHorizonDays-1), loc)
 	var assignments []SupportAssignment
-	if err := s.DB.Preload("PrimaryAssignee").Where("assignment_date >= ? AND assignment_date <= ?", from, to).Find(&assignments).Error; err != nil {
+	if err := s.DB.Scopes(s.userPreload("PrimaryAssignee")).Where("assignment_date >= ? AND assignment_date <= ?", from, to).Find(&assignments).Error; err != nil {
+		return nil, err
+	}
+	if err := s.hydrate(s.DB, primaryAssignmentsTargets(assignments)); err != nil {
 		return nil, err
 	}
 	assignmentByDate := make(map[string]SupportAssignment, len(assignments))
@@ -147,7 +153,10 @@ func (s *Service) ListCalendar(actorID uint, duration int, requestedStaffID *uin
 	}
 
 	var availability []StaffAvailability
-	if err := s.DB.Preload("Staff").Where("availability_date >= ? AND availability_date <= ?", from, to).Find(&availability).Error; err != nil {
+	if err := s.DB.Scopes(s.userPreload("Staff")).Where("availability_date >= ? AND availability_date <= ?", from, to).Find(&availability).Error; err != nil {
+		return nil, err
+	}
+	if err := s.hydrate(s.DB, availabilityTargets(availability)); err != nil {
 		return nil, err
 	}
 	availabilityByStaffDate := make(map[string][]StaffAvailability)
@@ -165,7 +174,10 @@ func (s *Service) ListCalendar(actorID uint, duration int, requestedStaffID *uin
 		return nil, err
 	}
 	var calls []SupportCall
-	if err := s.DB.Preload("AssignedStaff").Where("scheduled_start_time >= ? AND scheduled_start_time < ? AND status IN ?", start, lastEnd, reservingCallStatuses).Find(&calls).Error; err != nil {
+	if err := s.DB.Scopes(s.userPreload("AssignedStaff")).Where("scheduled_start_time >= ? AND scheduled_start_time < ? AND status IN ?", start, lastEnd, reservingCallStatuses).Find(&calls).Error; err != nil {
+		return nil, err
+	}
+	if err := s.hydrate(s.DB, callTargets(calls)); err != nil {
 		return nil, err
 	}
 	callsByStaffDate := make(map[string][]SupportCall)
@@ -310,6 +322,17 @@ func (s *Service) CreateCall(actorID uint, input CreateCallInput) (*SupportCallR
 	}
 
 	var requestID uint
+	if s.Directory != nil {
+		extra := []uint{actorID}
+		if input.RequestedStaffID != nil {
+			extra = append(extra, *input.RequestedStaffID)
+		}
+		prepared, err := s.prepareIdentity(userScope{Extra: extra, Dates: []string{date}})
+		if err != nil {
+			return nil, err
+		}
+		s = prepared
+	}
 	err = s.DB.Transaction(func(tx *gorm.DB) error {
 		var assignedStaffID uint
 		requestType, status := RequestTypeAutomaticDaily, RequestStatusApproved
@@ -400,11 +423,17 @@ func (s *Service) ListRequests(actorID uint, scope string) ([]SupportCallRequest
 		return nil, fmt.Errorf("%w: unsupported request scope", ErrInvalidInput)
 	}
 	var requests []SupportCallRequest
-	return requests, query.Find(&requests).Error
+	if err := query.Find(&requests).Error; err != nil {
+		return nil, err
+	}
+	if err := s.hydrate(s.DB, requestsTargets(requests)); err != nil {
+		return nil, err
+	}
+	return requests, nil
 }
 
 func (s *Service) ListCalls(actorID uint, scope string) ([]SupportCall, error) {
-	query := s.DB.Preload("AssignedStaff").Order("scheduled_start_time ASC")
+	query := s.DB.Scopes(s.userPreload("AssignedStaff")).Order("scheduled_start_time ASC")
 	switch scope {
 	case "", "mine":
 		query = query.Joins("JOIN support_call_requests ON support_call_requests.id = support_calls.support_request_id").
@@ -422,7 +451,13 @@ func (s *Service) ListCalls(actorID uint, scope string) ([]SupportCall, error) {
 		return nil, fmt.Errorf("%w: unsupported call scope", ErrInvalidInput)
 	}
 	var calls []SupportCall
-	return calls, query.Find(&calls).Error
+	if err := query.Find(&calls).Error; err != nil {
+		return nil, err
+	}
+	if err := s.hydrate(s.DB, callTargets(calls)); err != nil {
+		return nil, err
+	}
+	return calls, nil
 }
 
 func (s *Service) DecideRequest(actorID, requestID uint, input RequestDecisionInput) (*SupportCallRequest, error) {
@@ -431,6 +466,13 @@ func (s *Service) DecideRequest(actorID, requestID uint, input RequestDecisionIn
 		return nil, fmt.Errorf("%w: decision must be approve, reject, or propose_alternative", ErrInvalidInput)
 	}
 	var resultID uint
+	if s.Directory != nil {
+		prepared, err := s.prepareIdentity(userScope{Extra: []uint{actorID}, Requests: []uint{requestID}})
+		if err != nil {
+			return nil, err
+		}
+		s = prepared
+	}
 	err := s.DB.Transaction(func(tx *gorm.DB) error {
 		request, call, err := s.requestAndCallTx(tx, requestID, true)
 		if err != nil {
@@ -509,6 +551,13 @@ func (s *Service) ApproveSpecificCall(actorID, requestID uint, input SpecificApp
 }
 
 func (s *Service) AcceptAlternative(actorID, requestID uint) (*SupportCallRequest, error) {
+	if s.Directory != nil {
+		prepared, err := s.prepareIdentity(userScope{Extra: []uint{actorID}, Requests: []uint{requestID}})
+		if err != nil {
+			return nil, err
+		}
+		s = prepared
+	}
 	var resultID uint
 	err := s.DB.Transaction(func(tx *gorm.DB) error {
 		request, call, err := s.requestAndCallTx(tx, requestID, true)
@@ -548,6 +597,13 @@ func (s *Service) AcceptAlternative(actorID, requestID uint) (*SupportCallReques
 }
 
 func (s *Service) CancelRequest(actorID, requestID uint) (*SupportCallRequest, error) {
+	if s.Directory != nil {
+		prepared, err := s.prepareIdentity(userScope{Extra: []uint{actorID}, Requests: []uint{requestID}})
+		if err != nil {
+			return nil, err
+		}
+		s = prepared
+	}
 	var resultID uint
 	err := s.DB.Transaction(func(tx *gorm.DB) error {
 		request, call, err := s.requestAndCallTx(tx, requestID, true)
@@ -600,6 +656,13 @@ func (s *Service) CompleteCall(actorID, callID uint, input CompleteCallInput) (*
 		return nil, fmt.Errorf("%w: invalid actual duration or internal notes", ErrInvalidInput)
 	}
 	var resultID uint
+	if s.Directory != nil {
+		prepared, err := s.prepareIdentity(userScope{Extra: []uint{actorID}, Calls: []uint{callID}})
+		if err != nil {
+			return nil, err
+		}
+		s = prepared
+	}
 	err = s.DB.Transaction(func(tx *gorm.DB) error {
 		var call SupportCall
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&call, callID).Error; err != nil {
@@ -643,7 +706,10 @@ func (s *Service) CompleteCall(actorID, callID uint, input CompleteCallInput) (*
 		return nil, err
 	}
 	var call SupportCall
-	if err := s.DB.Preload("AssignedStaff").First(&call, resultID).Error; err != nil {
+	if err := s.DB.Scopes(s.userPreload("AssignedStaff")).First(&call, resultID).Error; err != nil {
+		return nil, err
+	}
+	if err := s.hydrate(s.DB, callRefTargets(&call)); err != nil {
 		return nil, err
 	}
 	if request, requestErr := s.request(call.SupportRequestID); requestErr == nil {
@@ -663,6 +729,13 @@ func (s *Service) ReassignCall(actorID, callID uint, input ReassignInput) (*Supp
 		return nil, fmt.Errorf("%w: replacement must be an active support admin", ErrInvalidInput)
 	}
 	var resultID uint
+	if s.Directory != nil {
+		prepared, err := s.prepareIdentity(userScope{Extra: []uint{actorID, input.UserID}, Calls: []uint{callID}})
+		if err != nil {
+			return nil, err
+		}
+		s = prepared
+	}
 	var previousAssigneeID *uint
 	err := s.DB.Transaction(func(tx *gorm.DB) error {
 		var call SupportCall
@@ -703,7 +776,10 @@ func (s *Service) ReassignCall(actorID, callID uint, input ReassignInput) (*Supp
 	}
 	_ = s.syncZoomMeeting(resultID)
 	var call SupportCall
-	if err := s.DB.Preload("AssignedStaff").First(&call, resultID).Error; err != nil {
+	if err := s.DB.Scopes(s.userPreload("AssignedStaff")).First(&call, resultID).Error; err != nil {
+		return nil, err
+	}
+	if err := s.hydrate(s.DB, callRefTargets(&call)); err != nil {
 		return nil, err
 	}
 	if request, requestErr := s.request(call.SupportRequestID); requestErr == nil {
@@ -751,6 +827,13 @@ func (s *Service) ReassignDay(actorID uint, date string, input ReassignInput) (*
 		return nil, err
 	}
 	var resultID uint
+	if s.Directory != nil {
+		prepared, err := s.prepareIdentity(userScope{Extra: []uint{actorID, input.UserID}, Dates: []string{date}})
+		if err != nil {
+			return nil, err
+		}
+		s = prepared
+	}
 	err = s.DB.Transaction(func(tx *gorm.DB) error {
 		var assignment SupportAssignment
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("assignment_date = ?", date).First(&assignment).Error; err != nil {
@@ -771,7 +854,10 @@ func (s *Service) ReassignDay(actorID uint, date string, input ReassignInput) (*
 		return nil, err
 	}
 	var assignment SupportAssignment
-	if err := s.DB.Preload("PrimaryAssignee").Preload("PreviousAssignee").First(&assignment, resultID).Error; err != nil {
+	if err := s.DB.Scopes(s.userPreload("PrimaryAssignee")).Scopes(s.userPreload("PreviousAssignee")).First(&assignment, resultID).Error; err != nil {
+		return nil, err
+	}
+	if err := s.hydrate(s.DB, assignmentTargets(&assignment)); err != nil {
 		return nil, err
 	}
 	s.notifyAssignmentChange(date, input.Reason)
@@ -923,12 +1009,18 @@ func (s *Service) ListUnavailability(actorID uint) ([]StaffAvailability, error) 
 			return nil, err
 		}
 	}
-	query := s.DB.Preload("Staff").Order("availability_date ASC, unavailable_start_time ASC")
+	query := s.DB.Scopes(s.userPreload("Staff")).Order("availability_date ASC, unavailable_start_time ASC")
 	if !manager {
 		query = query.Where("staff_id = ?", actorID)
 	}
 	var records []StaffAvailability
-	return records, query.Find(&records).Error
+	if err := query.Find(&records).Error; err != nil {
+		return nil, err
+	}
+	if err := s.hydrate(s.DB, availabilityTargets(records)); err != nil {
+		return nil, err
+	}
+	return records, nil
 }
 
 func (s *Service) GetProfile(actorID uint) (*SupportProfile, error) {
@@ -939,16 +1031,21 @@ func (s *Service) GetProfile(actorID uint) (*SupportProfile, error) {
 		return nil, err
 	}
 	profile := &SupportProfile{}
-	if err := s.DB.Preload("PrimaryAssignee").Where("primary_assignee_id = ? AND assignment_date >= ?", actorID, s.today()).Order("assignment_date ASC").Find(&profile.Assignments).Error; err != nil {
+	if err := s.DB.Scopes(s.userPreload("PrimaryAssignee")).Where("primary_assignee_id = ? AND assignment_date >= ?", actorID, s.today()).Order("assignment_date ASC").Find(&profile.Assignments).Error; err != nil {
 		return nil, err
 	}
-	if err := s.DB.Preload("AssignedStaff").Where("assigned_staff_id = ? AND scheduled_start_time >= ? AND status = ?", actorID, s.now(), RequestStatusApproved).Order("scheduled_start_time ASC").Find(&profile.UpcomingCalls).Error; err != nil {
+	if err := s.DB.Scopes(s.userPreload("AssignedStaff")).Where("assigned_staff_id = ? AND scheduled_start_time >= ? AND status = ?", actorID, s.now(), RequestStatusApproved).Order("scheduled_start_time ASC").Find(&profile.UpcomingCalls).Error; err != nil {
 		return nil, err
 	}
 	if err := s.requestQuery().Where("requested_staff_id = ? AND status IN ?", actorID, []string{RequestStatusAwaitingApproval, RequestStatusAlternativeProposed}).Order("created_at ASC").Find(&profile.DirectRequests).Error; err != nil {
 		return nil, err
 	}
-	if err := s.DB.Preload("Staff").Where("staff_id = ?", actorID).Order("availability_date ASC, unavailable_start_time ASC").Find(&profile.Availability).Error; err != nil {
+	if err := s.DB.Scopes(s.userPreload("Staff")).Where("staff_id = ?", actorID).Order("availability_date ASC, unavailable_start_time ASC").Find(&profile.Availability).Error; err != nil {
+		return nil, err
+	}
+	targets := append(primaryAssignmentsTargets(profile.Assignments), callTargets(profile.UpcomingCalls)...)
+	targets = append(targets, availabilityTargets(profile.Availability)...)
+	if err := s.hydrate(s.DB, targets); err != nil {
 		return nil, err
 	}
 	return profile, nil
@@ -957,6 +1054,13 @@ func (s *Service) GetProfile(actorID uint) (*SupportProfile, error) {
 func (s *Service) reassignUnavailableDay(date, reason string) error {
 	if !isSupportBusinessDay(date) {
 		return nil
+	}
+	if s.Directory != nil {
+		prepared, err := s.prepareIdentity(userScope{Dates: []string{date}})
+		if err != nil {
+			return err
+		}
+		s = prepared
 	}
 	err := s.DB.Transaction(func(tx *gorm.DB) error {
 		var assignment SupportAssignment
@@ -1058,6 +1162,13 @@ func (s *Service) markCallsForAvailability(availability *StaffAvailability, reas
 		return nil
 	}
 	requestIDs := make([]uint, 0)
+	if s.Directory != nil {
+		prepared, err := s.prepareIdentity(userScope{Extra: []uint{availability.StaffID}, Dates: []string{availability.AvailabilityDate}})
+		if err != nil {
+			return err
+		}
+		s = prepared
+	}
 	err := s.DB.Transaction(func(tx *gorm.DB) error {
 		var calls []SupportCall
 		if err := tx.Where("assigned_staff_id = ? AND scheduled_start_time < ? AND scheduled_end_time > ? AND status IN ?", availability.StaffID, *availability.UnavailableEndTime, *availability.UnavailableStartTime, reservingCallStatuses).Find(&calls).Error; err != nil {
@@ -1145,13 +1256,16 @@ func (s *Service) parseAlternativeSlot(input RequestDecisionInput, requestedDate
 }
 
 func (s *Service) requestQuery() *gorm.DB {
-	return s.DB.Preload("RequestedBy").Preload("RequestedStaff").Preload("AssignedStaff").Preload("Call")
+	return s.DB.Scopes(s.userPreload("RequestedBy")).Scopes(s.userPreload("RequestedStaff")).Scopes(s.userPreload("AssignedStaff")).Preload("Call")
 }
 
 func (s *Service) request(requestID uint) (*SupportCallRequest, error) {
 	var request SupportCallRequest
 	if err := s.requestQuery().First(&request, requestID).Error; err != nil {
 		return nil, mapNotFound(err)
+	}
+	if err := s.hydrate(s.DB, requestTargets(&request)); err != nil {
+		return nil, err
 	}
 	return &request, nil
 }
@@ -1273,7 +1387,10 @@ func (s *Service) notifyAssignmentChange(date, reason string) {
 		return
 	}
 	var assignment SupportAssignment
-	if err := s.DB.Preload("PrimaryAssignee").Preload("PreviousAssignee").Where("assignment_date = ?", date).First(&assignment).Error; err != nil {
+	if err := s.DB.Scopes(s.userPreload("PrimaryAssignee")).Scopes(s.userPreload("PreviousAssignee")).Where("assignment_date = ?", date).First(&assignment).Error; err != nil {
+		return
+	}
+	if err := s.hydrate(s.DB, assignmentTargets(&assignment)); err != nil {
 		return
 	}
 	recipients := make(map[string]supportCallEmailRecipient)
@@ -1291,8 +1408,7 @@ func (s *Service) notifyAssignmentChange(date, reason string) {
 	}
 	addRecipient(assignment.PrimaryAssignee, supportCallStaffAudience)
 	addRecipient(assignment.PreviousAssignee, supportCallStaffAudience)
-	var managers []SupportUser
-	if err := s.DB.Where("LOWER(role) = ?", strings.ToLower(RoleManager)).Find(&managers).Error; err == nil {
+	if managers, err := s.roleUsers(s.DB, RoleManager); err == nil {
 		for _, manager := range managers {
 			addRecipient(&manager, supportCallManagerAudience)
 		}

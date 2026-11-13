@@ -24,8 +24,10 @@ import (
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 
+	"nordik-drive-api/internal/auditoutbox"
 	"nordik-drive-api/internal/auth"
 	"nordik-drive-api/internal/honour"
+	"nordik-drive-api/internal/identityclient"
 	"nordik-drive-api/internal/mailer"
 	"nordik-drive-api/internal/outbox"
 	"nordik-drive-api/internal/requestscope"
@@ -33,9 +35,12 @@ import (
 )
 
 type FileService struct {
-	DB     *gorm.DB
-	Mailer mailer.EmailSender
-	Outbox *outbox.Writer
+	DB               *gorm.DB
+	Mailer           mailer.EmailSender
+	Outbox           *outbox.Writer
+	Directory        identityclient.Directory
+	reviewRecipients map[int64]identityclient.Profile
+	Audit            *auditoutbox.Writer
 }
 
 type fileVersionHistoryQueryRow struct {
@@ -76,6 +81,9 @@ const (
 )
 
 func (fs *FileService) SaveFilesMultipart(uploadedFiles []*multipart.FileHeader, filenames FileUploadInput, userID uint) ([]File, error) {
+	if fs.Audit != nil {
+		return fs.auditUpload(uploadedFiles, filenames, userID)
+	}
 	if err := ensureFileDescriptionSchema(fs.DB); err != nil {
 		return nil, err
 	}
@@ -429,7 +437,7 @@ func (fs *FileService) ReplaceFiles(uploadedFile *multipart.FileHeader, fileID u
 			return err
 		}
 
-		return fs.enqueueVersionTransitionJob(
+		if err := fs.enqueueVersionTransitionJob(
 			tx,
 			lockedFile.ID,
 			fileVersion.ID,
@@ -438,11 +446,25 @@ func (fs *FileService) ReplaceFiles(uploadedFile *multipart.FileHeader, fileID u
 			newVersion,
 			userID,
 			versionTransitionOperationReplace,
-		)
+		); err != nil {
+			return err
+		}
+		return fs.auditEvent(tx, "REPLACE_FILE", "INFO", fmt.Sprintf("File replace queued: %s", lockedFile.Filename), &lockedFile.Filename, nil)
 	})
 }
 
 func (fs *FileService) GetUserRole(userID uint) (string, error) {
+	if fs.Directory != nil {
+		principals, err := fs.Directory.Principals(requestscope.Context(fs.DB), []int64{int64(userID)})
+		if err != nil {
+			return "", err
+		}
+		principal, found := principals[int64(userID)]
+		if !found {
+			return "", gorm.ErrRecordNotFound
+		}
+		return principal.Role, nil
+	}
 	var user auth.Auth
 	if err := fs.DB.First(&user, userID).Error; err != nil {
 		return "", err
@@ -451,6 +473,9 @@ func (fs *FileService) GetUserRole(userID uint) (string, error) {
 }
 
 func (fs *FileService) GetAllFiles(userID uint, role string) ([]FileWithUser, error) {
+	if fs.Directory != nil {
+		return fs.getAllFilesOwned(userID, role)
+	}
 	var files []FileWithUser
 
 	if role == "Admin" {
@@ -620,6 +645,9 @@ func (fs *FileService) GetNormalizedFileData(filename string, version int) ([]Fi
 }
 
 func (fs *FileService) SyncNormalizedFileData(filename string, version int) (*NormalizationSyncResult, error) {
+	if fs.Audit != nil {
+		return fs.auditNormalization(filename, version)
+	}
 	options := NormalizationSyncOptions{
 		BatchSize: defaultNormalizationBatch,
 	}
@@ -682,6 +710,9 @@ func normalizeColorHex(raw string) string {
 // ...existing code...
 
 func (fs *FileService) DeleteFile(fileID string) (File, error) {
+	if fs.Audit != nil {
+		return fs.auditFileState(fileID, true)
+	}
 	// Check if file exists
 	var file File
 	if err := fs.DB.Where("id = ?", fileID).First(&file).Error; err != nil {
@@ -697,6 +728,9 @@ func (fs *FileService) DeleteFile(fileID string) (File, error) {
 }
 
 func (fs *FileService) ResetFile(fileID string) (File, error) {
+	if fs.Audit != nil {
+		return fs.auditFileState(fileID, false)
+	}
 	var file File
 	if err := fs.DB.Where("id = ?", fileID).First(&file).Error; err != nil {
 		return file, err
@@ -731,6 +765,9 @@ func parseCSVReader(file multipart.File) ([]string, [][]string, error) {
 }
 
 func (fs *FileService) CreateAccess(input []FileAccess) error {
+	if fs.Audit != nil {
+		return fs.auditMutation("GRAND_FILE_ACCESS", "INFO", "file access granted", nil, input, func(copy *FileService) error { return copy.CreateAccess(input) })
+	}
 	if err := fs.DB.Create(&input).Error; err != nil {
 		return err
 	}
@@ -738,6 +775,9 @@ func (fs *FileService) CreateAccess(input []FileAccess) error {
 }
 
 func (fs *FileService) DeleteAccess(accessId string) error {
+	if fs.Audit != nil {
+		return fs.auditMutation("REVOKE_FILE_ACCESS", "WARN", "file access revoked", nil, nil, func(copy *FileService) error { return copy.DeleteAccess(accessId) })
+	}
 	// Check if access record exists
 	var access FileAccess
 	if err := fs.DB.Where("id = ?", accessId).First(&access).Error; err != nil {
@@ -753,6 +793,9 @@ func (fs *FileService) DeleteAccess(accessId string) error {
 }
 
 func (fs *FileService) GetFileAccess(fileId string) ([]FileAccessWithUser, error) {
+	if fs.Directory != nil {
+		return fs.getFileAccessOwned(fileId)
+	}
 	var results []FileAccessWithUser
 
 	err := fs.DB.Table("file_access").
@@ -792,6 +835,10 @@ func (fs *FileService) GetFileHistory(fileId string) ([]FileVersionWithUser, err
 		"file_version.columns_order",
 	}
 	queryColumns := append([]string{}, selectColumns...)
+	if fs.Directory != nil {
+		queryColumns[3] = "'' AS firstname"
+		queryColumns[4] = "'' AS lastname"
+	}
 	if fs.DB.Migrator().HasTable(&FileVersion{}) && fs.DB.Migrator().HasColumn(&FileVersion{}, "description") {
 		queryColumns = append(queryColumns, "file_version.description")
 	} else {
@@ -822,8 +869,10 @@ func (fs *FileService) GetFileHistory(fileId string) ([]FileVersionWithUser, err
 	var versionRows []fileVersionHistoryQueryRow
 	query := fs.DB.Table("file_version").
 		Select(strings.Join(queryColumns, ", ")).
-		Joins("LEFT JOIN users ON users.id = file_version.inserted_by").
 		Where("file_version.file_id = ?", file.ID)
+	if fs.Directory == nil {
+		query = query.Joins("LEFT JOIN users ON users.id = file_version.inserted_by")
+	}
 	if fs.DB.Migrator().HasTable(&FileVersion{}) && fs.DB.Migrator().HasColumn(&FileVersion{}, "reconciliation_status") {
 		query = query.Order(
 			fmt.Sprintf(
@@ -852,6 +901,30 @@ func (fs *FileService) GetFileHistory(fileId string) ([]FileVersionWithUser, err
 		return nil, err
 	}
 
+	remoteNames := map[int64]identityclient.Profile{}
+	if fs.Directory != nil {
+		ids := []int64{}
+		for _, row := range versionRows {
+			if row.InsertedBy > 0 {
+				ids = append(ids, int64(row.InsertedBy))
+			}
+		}
+		for _, row := range aggregates {
+			if row.InsertedBy > 0 {
+				ids = append(ids, int64(row.InsertedBy))
+			}
+		}
+		var err error
+		remoteNames, err = fs.profileMap(ids, false)
+		if err != nil {
+			return nil, err
+		}
+		for i := range versionRows {
+			p := remoteNames[int64(versionRows[i].InsertedBy)]
+			versionRows[i].Firstname = p.Firstname
+			versionRows[i].Lastname = p.Lastname
+		}
+	}
 	resultsByVersion := make(map[int]FileVersionWithUser)
 	for _, row := range versionRows {
 		if _, exists := resultsByVersion[row.Version]; exists {
@@ -872,7 +945,11 @@ func (fs *FileService) GetFileHistory(fileId string) ([]FileVersionWithUser, err
 	}
 
 	userNames := make(map[uint]historyUserName)
-	if len(missingUserIDs) > 0 {
+	if fs.Directory != nil {
+		for id, p := range remoteNames {
+			userNames[uint(id)] = historyUserName{ID: uint(id), Firstname: p.Firstname, Lastname: p.Lastname}
+		}
+	} else if len(missingUserIDs) > 0 {
 		userIDs := make([]uint, 0, len(missingUserIDs))
 		for id := range missingUserIDs {
 			userIDs = append(userIDs, id)
@@ -1072,7 +1149,7 @@ func (fs *FileService) RevertFile(filename string, version int, userID uint) err
 			return err
 		}
 
-		return fs.enqueueVersionTransitionJob(
+		if err := fs.enqueueVersionTransitionJob(
 			tx,
 			lockedFile.ID,
 			newFileVersion.ID,
@@ -1081,7 +1158,10 @@ func (fs *FileService) RevertFile(filename string, version int, userID uint) err
 			version,
 			userID,
 			versionTransitionOperationRevert,
-		)
+		); err != nil {
+			return err
+		}
+		return fs.auditEvent(tx, "REVERT_FILE", "INFO", fmt.Sprintf("%s file revert queued to version %d", filename, version), &filename, nil)
 	})
 }
 
@@ -1561,8 +1641,7 @@ func (fs *FileService) GetEditRequests(statusCSV *string, userID *uint) ([]FileE
 		RequestType    string `gorm:"column:request_type"`
 	}
 
-	q := fs.DB.Table("file_edit_request").
-		Select(`
+	columns := `
 			file_edit_request.request_id,
 			file_edit_request.row_id,
 			file_edit_request.user_id,
@@ -1579,10 +1658,17 @@ func (fs *FileService) GetEditRequests(statusCSV *string, userID *uint) ([]FileE
 			file_edit_request.file_id,
 			COALESCE(file.filename, '') AS file_name,
 			COALESCE(file_edit_request.request_type, 'edit') AS request_type
-		`).
-		Joins("JOIN users ON users.id = file_edit_request.user_id").
+		`
+	if fs.Directory != nil {
+		columns = strings.ReplaceAll(columns, "users.firstname", "'' AS firstname")
+		columns = strings.ReplaceAll(columns, "users.lastname", "'' AS lastname")
+	}
+	q := fs.DB.Table("file_edit_request").Select(columns).
 		Joins("LEFT JOIN file ON file.id = file_edit_request.file_id").
 		Order("file_edit_request.created_at DESC")
+	if fs.Directory == nil {
+		q = q.Joins("JOIN users ON users.id = file_edit_request.user_id")
+	}
 
 	var statuses []string
 	if statusCSV != nil && strings.TrimSpace(*statusCSV) != "" {
@@ -1604,6 +1690,27 @@ func (fs *FileService) GetEditRequests(statusCSV *string, userID *uint) ([]FileE
 
 	if err := q.Scan(&baseRequests).Error; err != nil {
 		return nil, err
+	}
+	if fs.Directory != nil {
+		ids := []int64{}
+		for _, row := range baseRequests {
+			if row.UserID > 0 {
+				ids = append(ids, int64(row.UserID))
+			}
+		}
+		profiles, err := fs.profileMap(ids, false)
+		if err != nil {
+			return nil, err
+		}
+		kept := baseRequests[:0]
+		for _, row := range baseRequests {
+			if p, found := profiles[int64(row.UserID)]; found {
+				row.Firstname = p.Firstname
+				row.Lastname = p.Lastname
+				kept = append(kept, row)
+			}
+		}
+		baseRequests = kept
 	}
 
 	requestIDs := make([]uint, 0, len(baseRequests))
@@ -1705,7 +1812,17 @@ func (fs *FileService) triggerReviewEmailAsync(fileedit *FileEditRequest) {
 		}()
 
 		var user auth.Auth
-		if err := fs.DB.Where("id = ?", fileedit.UserID).First(&user).Error; err != nil {
+		if fs.Directory != nil {
+			profiles, err := fs.profileMap([]int64{int64(fileedit.UserID)}, true)
+			if err != nil {
+				return
+			}
+			p, found := profiles[int64(fileedit.UserID)]
+			if !found {
+				return
+			}
+			user = auth.Auth{ID: int(p.ID), FirstName: p.Firstname, LastName: p.Lastname, Email: p.Email}
+		} else if err := fs.DB.Where("id = ?", fileedit.UserID).First(&user).Error; err != nil {
 			return
 		}
 
@@ -1746,6 +1863,13 @@ func (fs *FileService) ReviewEditRequest(
 	}
 
 	var reviewedRequest *FileEditRequest
+	if fs.Directory != nil && fs.Outbox != nil {
+		prepared, err := fs.prepareReviewRecipient(requestID)
+		if err != nil {
+			return err
+		}
+		fs = prepared
+	}
 
 	if err := fs.DB.Transaction(func(tx *gorm.DB) error {
 		hasDetailStatuses := false
@@ -1987,6 +2111,13 @@ func (fs *FileService) ReviewAchieverStoryRequest(
 	}
 
 	var reviewedRequest *FileEditRequest
+	if fs.Directory != nil && fs.Outbox != nil {
+		prepared, err := fs.prepareReviewRecipient(requestID)
+		if err != nil {
+			return err
+		}
+		fs = prepared
+	}
 	if err := fs.DB.Transaction(func(tx *gorm.DB) error {
 		var req FileEditRequest
 		if err := tx.Where("request_id = ?", requestID).First(&req).Error; err != nil {

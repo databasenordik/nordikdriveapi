@@ -28,7 +28,7 @@ resource "google_cloud_run_v2_job" "signup_cleanup" {
     task_count  = 1
     parallelism = 1
     template {
-      service_account = google_service_account.runtime["legacy"].email
+      service_account = google_service_account.runtime[var.identity_signup_cleanup ? "identity" : "legacy"].email
       timeout         = "60s"
       max_retries     = 1
       dynamic "vpc_access" {
@@ -42,15 +42,15 @@ resource "google_cloud_run_v2_job" "signup_cleanup" {
         }
       }
       containers {
-        image = var.server_image
+        image = var.identity_signup_cleanup ? var.identity_image : var.server_image
         args  = ["signup-cleanup"]
         resources {
           limits = { cpu = "1", memory = "512Mi" }
         }
         dynamic "env" {
           for_each = merge(local.common_env, {
-            DB_USER     = google_sql_user.iam["legacy"].name
-            DB_SCHEMA   = "public"
+            DB_USER     = google_sql_user.iam[var.identity_signup_cleanup ? "identity" : "legacy"].name
+            DB_SCHEMA   = var.identity_signup_cleanup ? (var.identity_tables_relocated ? "identity" : "identity,public") : "public"
             DB_MAX_OPEN = "1"
           })
           content {
@@ -61,7 +61,7 @@ resource "google_cloud_run_v2_job" "signup_cleanup" {
       }
     }
   }
-  depends_on = [terraform_data.safeguards, terraform_data.signup_cleanup_safeguards, google_project_iam_member.sql]
+  depends_on = [terraform_data.serialized_rollout_safeguards, terraform_data.safeguards, terraform_data.signup_cleanup_safeguards, google_project_iam_member.sql]
   lifecycle { prevent_destroy = true }
 }
 

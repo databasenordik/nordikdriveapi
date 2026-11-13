@@ -19,12 +19,15 @@ import (
 	"github.com/lib/pq"
 	"github.com/xuri/excelize/v2"
 	"gorm.io/gorm"
+	"nordik-drive-api/internal/identityclient"
+	"nordik-drive-api/internal/requestscope"
 )
 
 const maxMediaZipFiles = 5000
 
 type AdminService struct {
-	DB *gorm.DB
+	DB        *gorm.DB
+	Directory identityclient.Directory
 
 	// OPTIONAL: for tests to stub paging/search without DB
 	searchHook func(req AdminFileEditSearchRequest) (*AdminSearchResponse, error)
@@ -44,9 +47,10 @@ func (as *AdminService) SearchFileEditRequests(req AdminFileEditSearchRequest) (
 func (as *AdminService) searchChanges(req AdminFileEditSearchRequest) (*AdminSearchResponse, error) {
 	// 1) base request query (NO join with details!)
 	reqBase := as.DB.Table("file_edit_request r").
-		Joins("LEFT JOIN file f ON f.id = r.file_id").
-		Joins("LEFT JOIN users u_req ON u_req.id = r.user_id").
-		Joins("LEFT JOIN users u_app ON u_app.id = r.reviewed_by")
+		Joins("LEFT JOIN file f ON f.id = r.file_id")
+	if as.Directory == nil {
+		reqBase = reqBase.Joins("LEFT JOIN users u_req ON u_req.id = r.user_id").Joins("LEFT JOIN users u_app ON u_app.id = r.reviewed_by")
+	}
 
 	// split clauses: request-level vs detail-level
 	reqClauses, detailClauses := splitClauses(req.Clauses)
@@ -144,32 +148,57 @@ func (as *AdminService) searchChanges(req AdminFileEditSearchRequest) (*AdminSea
 		Group("d.request_id")
 
 	var rows []AdminChangeRow
-	if err := finalReqQ.Session(&gorm.Session{}).
-		Joins("LEFT JOIN (?) dc ON dc.request_id = r.request_id", detailCountsSubq).
-		Select(`
-			r.request_id,
-			r.status,
-			r.file_id,
-			COALESCE(f.filename,'') AS file_name,
-
-			COALESCE(r.firstname,'') AS firstname,
-			COALESCE(r.lastname,'') AS lastname,
-
+	columns := `
+			r.request_id, r.status, r.file_id, COALESCE(f.filename,'') AS file_name,
+			COALESCE(r.firstname,'') AS firstname, COALESCE(r.lastname,'') AS lastname,
 			COALESCE(r.community, '{}'::text[]) AS community,
 			COALESCE(r.uploader_community, '{}'::text[]) AS uploader_community,
-
-			COALESCE(u_req.firstname || ' ' || u_req.lastname, 'User ' || r.user_id::text) AS requested_by,
-			COALESCE(u_app.firstname || ' ' || u_app.lastname, '') AS reviewed_by,
-
-			r.consent,
-			COALESCE(dc.change_count, 0) AS change_count,
-			r.created_at
-		`).
+			'' AS requested_by, '' AS reviewed_by,
+			r.user_id AS requested_by_id, r.reviewed_by AS reviewed_by_id,
+			r.consent, COALESCE(dc.change_count,0) AS change_count, r.created_at`
+	if as.Directory == nil {
+		columns = strings.Replace(columns, "'' AS requested_by", "COALESCE(u_req.firstname || ' ' || u_req.lastname, 'User ' || r.user_id::text) AS requested_by", 1)
+		columns = strings.Replace(columns, "'' AS reviewed_by", "COALESCE(u_app.firstname || ' ' || u_app.lastname, '') AS reviewed_by", 1)
+	}
+	if err := finalReqQ.Session(&gorm.Session{}).
+		Joins("LEFT JOIN (?) dc ON dc.request_id = r.request_id", detailCountsSubq).
+		Select(columns).
 		Order("r.created_at DESC").
 		Limit(req.PageSize).
 		Offset(offset).
 		Scan(&rows).Error; err != nil {
 		return nil, err
+	}
+	if as.Directory != nil {
+		ids := []int64{}
+		for _, row := range rows {
+			if row.RequestedByID != nil && *row.RequestedByID > 0 {
+				ids = append(ids, int64(*row.RequestedByID))
+			}
+			if row.ReviewedByID != nil && *row.ReviewedByID > 0 {
+				ids = append(ids, int64(*row.ReviewedByID))
+			}
+		}
+		if len(ids) > 0 {
+			profiles, err := as.Directory.Profiles(requestscope.Context(as.DB), ids, false)
+			if err != nil {
+				return nil, err
+			}
+			for i := range rows {
+				row := &rows[i]
+				if row.RequestedByID != nil {
+					row.RequestedBy = fmt.Sprintf("User %d", *row.RequestedByID)
+					if p, found := profiles[int64(*row.RequestedByID)]; found {
+						row.RequestedBy = p.Firstname + " " + p.Lastname
+					}
+				}
+				if row.ReviewedByID != nil {
+					if p, found := profiles[int64(*row.ReviewedByID)]; found {
+						row.ReviewedBy = p.Firstname + " " + p.Lastname
+					}
+				}
+			}
+		}
 	}
 
 	totalPages := int(math.Ceil(float64(totalRequests) / float64(req.PageSize)))

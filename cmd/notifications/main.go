@@ -73,17 +73,30 @@ func run() error {
 	}
 	defer objects.Close()
 	service := &notifications.Service{Store: &notifications.Store{DB: db}, Codec: codec, Queue: queue, Provider: &notifications.SMTPProvider{Mail: mailer.NewService(cfg.GmailUser, cfg.GmailPass, "smtp.gmail.com", "587"), Storage: objects}}
-	if address := os.Getenv("NOTIFICATION_OUTBOX_SOURCE_URL"); address != "" {
+	sources := notificationcontract.OwnerSources{}
+	for _, address := range []string{os.Getenv("NOTIFICATION_OUTBOX_IDENTITY_URL"), os.Getenv("NOTIFICATION_OUTBOX_SOURCE_URL")} {
+		if address == "" {
+			continue
+		}
 		tokens, err := workload.Source(ctx, address)
 		if err != nil {
 			return err
 		}
-		service.Source, err = notificationcontract.NewSourceClient(address, tokens)
+		source, sourceErr := notificationcontract.NewSourceClient(address, tokens)
+		err = sourceErr
 		if err != nil {
 			return err
 		}
+		sources = append(sources, source)
+	}
+	if len(sources) > 0 {
+		service.Source = sources
 	}
 	grants := map[string]map[string]bool{"producer:identity": {legacy: true, worker: true}, "producer:records": {legacy: true, worker: true}, "producer:support": {legacy: true, worker: true}, "delivery": {task: true}, "recovery": {worker: true}}
+	if err := configureIdentityPolicy(grants, os.Getenv("NOTIFICATIONS_IDENTITY_ACCOUNT"), os.Getenv("NOTIFICATIONS_IDENTITY_EXCLUSIVE")); err != nil {
+		return err
+	}
+
 	grants["operator"] = map[string]bool{}
 	for _, operator := range strings.Split(os.Getenv("NOTIFICATIONS_OPERATOR_ACCOUNTS"), ",") {
 		operator = strings.TrimSpace(operator)

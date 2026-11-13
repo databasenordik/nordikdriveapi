@@ -20,6 +20,8 @@ type Client struct {
 	HTTP   *http.Client
 }
 
+var ErrNotFound = errors.New("notification owner record not found")
+
 func NewClient(address string, tokens oauth2.TokenSource) (*Client, error) {
 	u, err := url.Parse(address)
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.Path != "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || tokens == nil {
@@ -50,6 +52,9 @@ func (c *Client) call(ctx context.Context, path string, input, output any) error
 		return errors.New("notification service unavailable")
 	}
 	defer response.Body.Close()
+	if response.StatusCode == http.StatusNotFound {
+		return ErrNotFound
+	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return errors.New("notification operation not accepted")
 	}

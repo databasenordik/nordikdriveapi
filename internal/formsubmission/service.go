@@ -17,6 +17,7 @@ import (
 	"gorm.io/gorm"
 
 	filehelper "nordik-drive-api/internal/file"
+	"nordik-drive-api/internal/identityclient"
 	"nordik-drive-api/internal/mailer"
 	"nordik-drive-api/internal/outbox"
 	"nordik-drive-api/internal/requestscope"
@@ -24,9 +25,11 @@ import (
 )
 
 type FormSubmissionService struct {
-	DB     *gorm.DB
-	Mailer mailer.EmailSender
-	Outbox *outbox.Writer
+	DB               *gorm.DB
+	Mailer           mailer.EmailSender
+	Outbox           *outbox.Writer
+	Directory        identityclient.Directory
+	reviewRecipients map[int64]identityclient.Profile
 }
 
 var uploadBase64ToGCSHook = util.UploadPhotoToGCSContext
@@ -352,6 +355,13 @@ func (s *FormSubmissionService) Upsert(req *SaveFormSubmissionRequest, userId in
 	}
 
 	formKey := strings.TrimSpace(req.FormKey)
+	if s.Directory != nil {
+		prepared, err := s.prepareUpsertProfiles(req, userId)
+		if err != nil {
+			return nil, err
+		}
+		s = prepared
+	}
 	fileName := strings.TrimSpace(req.FileName)
 	formLabel := strings.TrimSpace(req.FormLabel)
 	firstName := strings.TrimSpace(req.FirstName)
@@ -394,6 +404,7 @@ func (s *FormSubmissionService) Upsert(req *SaveFormSubmissionRequest, userId in
 	}
 
 	var savedSubmissionID int64
+	var ownedResponse *GetFormSubmissionResponse
 	err = s.DB.Transaction(func(tx *gorm.DB) error {
 		var sub FormSubmission
 		findErr := tx.
@@ -534,6 +545,13 @@ func (s *FormSubmissionService) Upsert(req *SaveFormSubmissionRequest, userId in
 				return err
 			}
 		}
+		if s.Directory != nil {
+			copy := *s
+			copy.DB = tx
+			var err error
+			ownedResponse, err = copy.getSubmissionResponseByID(sub.ID)
+			return err
+		}
 
 		return nil
 	})
@@ -541,6 +559,9 @@ func (s *FormSubmissionService) Upsert(req *SaveFormSubmissionRequest, userId in
 		return nil, err
 	}
 
+	if s.Directory != nil {
+		return ownedResponse, nil
+	}
 	return s.getSubmissionResponseByID(savedSubmissionID)
 }
 
@@ -554,9 +575,9 @@ func (s *FormSubmissionService) GetByRowAndForm(rowID int64, formKey string, fil
 	}
 
 	q := s.DB.
-		Preload("CreatedByUser", preloadFormSubmissionUser).
-		Preload("EditedByUser", preloadFormSubmissionUser).
-		Preload("ReviewedByUser", preloadFormSubmissionUser).
+		Scopes(s.userPreload("CreatedByUser", preloadFormSubmissionUser)).
+		Scopes(s.userPreload("EditedByUser", preloadFormSubmissionUser)).
+		Scopes(s.userPreload("ReviewedByUser", preloadFormSubmissionUser)).
 		Where("row_id = ? AND form_key = ?", rowID, key)
 
 	if fileID != nil && *fileID > 0 {
@@ -600,9 +621,9 @@ func (s *FormSubmissionService) GetActiveByRowAndForm(rowID int64, formKey strin
 	}
 
 	q := s.DB.
-		Preload("CreatedByUser", preloadFormSubmissionUser).
-		Preload("EditedByUser", preloadFormSubmissionUser).
-		Preload("ReviewedByUser", preloadFormSubmissionUser).
+		Scopes(s.userPreload("CreatedByUser", preloadFormSubmissionUser)).
+		Scopes(s.userPreload("EditedByUser", preloadFormSubmissionUser)).
+		Scopes(s.userPreload("ReviewedByUser", preloadFormSubmissionUser)).
 		Where("row_id = ? AND form_key = ? AND status <> ?", rowID, key, ReviewStatusRejected).
 		Order("id desc")
 
@@ -629,9 +650,9 @@ func (s *FormSubmissionService) GetByID(id int64) (*GetFormSubmissionResponse, e
 
 	var sub FormSubmission
 	if err := s.DB.
-		Preload("CreatedByUser", preloadFormSubmissionUser).
-		Preload("EditedByUser", preloadFormSubmissionUser).
-		Preload("ReviewedByUser", preloadFormSubmissionUser).
+		Scopes(s.userPreload("CreatedByUser", preloadFormSubmissionUser)).
+		Scopes(s.userPreload("EditedByUser", preloadFormSubmissionUser)).
+		Scopes(s.userPreload("ReviewedByUser", preloadFormSubmissionUser)).
 		First(&sub, id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return &GetFormSubmissionResponse{
@@ -658,9 +679,9 @@ func preloadFormSubmissionUser(db *gorm.DB) *gorm.DB {
 func (s *FormSubmissionService) getSubmissionResponseByID(id int64) (*GetFormSubmissionResponse, error) {
 	var sub FormSubmission
 	if err := s.DB.
-		Preload("CreatedByUser", preloadFormSubmissionUser).
-		Preload("EditedByUser", preloadFormSubmissionUser).
-		Preload("ReviewedByUser", preloadFormSubmissionUser).
+		Scopes(s.userPreload("CreatedByUser", preloadFormSubmissionUser)).
+		Scopes(s.userPreload("EditedByUser", preloadFormSubmissionUser)).
+		Scopes(s.userPreload("ReviewedByUser", preloadFormSubmissionUser)).
 		First(&sub, id).Error; err != nil {
 		return nil, err
 	}
@@ -679,13 +700,16 @@ func (s *FormSubmissionService) buildFormSubmissionResponse(sub FormSubmission) 
 
 	var uploads []FormSubmissionUpload
 	if err := s.DB.
-		Preload("ReviewedByUser", preloadFormSubmissionUser).
+		Scopes(s.userPreload("ReviewedByUser", preloadFormSubmissionUser)).
 		Where("submission_id = ?", sub.ID).
 		Order("id asc").
 		Find(&uploads).Error; err != nil {
 		return nil, err
 	}
 
+	if err := s.enrichUsers([]*FormSubmission{&sub}, uploads); err != nil {
+		return nil, err
+	}
 	detailKeyByID := make(map[int64]string, len(details))
 	respDetails := make([]FormSubmissionDetailResponse, 0, len(details))
 
@@ -856,9 +880,9 @@ func (s *FormSubmissionService) SearchSubmissions(
 
 	var items []FormSubmission
 	if err := q.
-		Preload("CreatedByUser", preloadUser).
-		Preload("EditedByUser", preloadUser).
-		Preload("ReviewedByUser", preloadUser).
+		Scopes(s.userPreload("CreatedByUser", preloadUser)).
+		Scopes(s.userPreload("EditedByUser", preloadUser)).
+		Scopes(s.userPreload("ReviewedByUser", preloadUser)).
 		Order("updated_at desc").
 		Order("id desc").
 		Limit(pageSize).
@@ -867,6 +891,9 @@ func (s *FormSubmissionService) SearchSubmissions(
 		return nil, err
 	}
 
+	if err := s.enrichItems(items); err != nil {
+		return nil, err
+	}
 	respItems := make([]FormSubmissionListItemResponse, 0, len(items))
 	for _, item := range items {
 		respItems = append(respItems, FormSubmissionListItemResponse{
@@ -970,10 +997,30 @@ func (s *FormSubmissionService) ReviewSubmission(req *ReviewFormSubmissionReques
 	var sub FormSubmission
 	now := time.Now().UTC()
 	shouldTriggerEmail := false
+	var ownedResponse *GetFormSubmissionResponse
+	if s.Directory != nil {
+		var refs FormSubmission
+		if err := s.DB.Select("id,created_by,edited_by,reviewed_by").First(&refs, "id=?", req.SubmissionID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, ErrFormSubmissionNotFound
+			}
+			return nil, err
+		}
+		profileOwner, err := s.prepareMutationProfiles(refs, int64(reviewerID))
+		if err != nil {
+			return nil, err
+		}
+		s = profileOwner
+		prepared, err := s.prepareReviewRecipient(req.SubmissionID)
+		if err != nil {
+			return nil, err
+		}
+		s = prepared
+	}
 
 	err := s.DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.
-			Preload("CreatedByUser").
+			Scopes(s.userPreload("CreatedByUser")).
 			Where("id = ?", req.SubmissionID).
 			First(&sub).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -982,6 +1029,12 @@ func (s *FormSubmissionService) ReviewSubmission(req *ReviewFormSubmissionReques
 			return err
 		}
 
+		if s.Directory != nil {
+			sub.CreatedByUser = s.preparedCreator(sub.CreatedByID)
+			if sub.CreatedByUser == nil {
+				return fmt.Errorf("submission creator unavailable")
+			}
+		}
 		if req.SubmissionReview != nil {
 			submissionUpdates := buildReviewUpdateMap(
 				req.SubmissionReview.Status,
@@ -1037,7 +1090,16 @@ func (s *FormSubmissionService) ReviewSubmission(req *ReviewFormSubmissionReques
 		}
 
 		if shouldTriggerEmail && s.Outbox != nil {
-			return s.enqueueReviewTx(tx, sub.ID, true)
+			if err := s.enqueueReviewTx(tx, sub.ID, true); err != nil {
+				return err
+			}
+		}
+		if s.Directory != nil {
+			copy := *s
+			copy.DB = tx
+			var err error
+			ownedResponse, err = copy.getSubmissionResponseByID(sub.ID)
+			return err
 		}
 		return nil
 	})
@@ -1051,6 +1113,9 @@ func (s *FormSubmissionService) ReviewSubmission(req *ReviewFormSubmissionReques
 		s.triggerReviewEmailAsync(&sub)
 	}
 
+	if s.Directory != nil {
+		return ownedResponse, nil
+	}
 	return s.getSubmissionResponseByID(sub.ID)
 }
 
@@ -1115,9 +1180,9 @@ func (s *FormSubmissionService) SearchMySubmissions(
 
 	var items []FormSubmission
 	if err := q.
-		Preload("CreatedByUser", preloadUser).
-		Preload("EditedByUser", preloadUser).
-		Preload("ReviewedByUser", preloadUser).
+		Scopes(s.userPreload("CreatedByUser", preloadUser)).
+		Scopes(s.userPreload("EditedByUser", preloadUser)).
+		Scopes(s.userPreload("ReviewedByUser", preloadUser)).
 		Order("updated_at desc").
 		Order("id desc").
 		Limit(pageSize).
@@ -1126,6 +1191,9 @@ func (s *FormSubmissionService) SearchMySubmissions(
 		return nil, err
 	}
 
+	if err := s.enrichItems(items); err != nil {
+		return nil, err
+	}
 	respItems := make([]FormSubmissionListItemResponse, 0, len(items))
 	for _, item := range items {
 		respItems = append(respItems, FormSubmissionListItemResponse{

@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm"
 
 	"nordik-drive-api/config"
+	"nordik-drive-api/internal/auditoutbox"
 	"nordik-drive-api/internal/mailer"
 	"nordik-drive-api/internal/notificationcontract"
 	"nordik-drive-api/internal/outbox"
@@ -24,6 +25,7 @@ type AuthService struct {
 	Outbox          *outbox.Writer
 	Signup          *SignupVerifier
 	RequireVerified bool
+	Audit           *auditoutbox.Writer
 }
 
 var sendMail = smtp.SendMail
@@ -40,13 +42,16 @@ func (s *AuthService) CreateUser(user Auth) (*Auth, error) {
 		if err := tx.Create(&user).Error; err != nil {
 			return err
 		}
+		if err := s.auditUser(tx, user, "SIGNUP"); err != nil {
+			return err
+		}
 		if s.Outbox != nil {
 			return s.Outbox.Send(tx, "identity", fmt.Sprintf("signup-welcome:%d", user.ID), []string{user.Email}, "Your database access account has been created", BuildSignupEmailBody(user.FirstName, user.LastName, user.Email))
 		}
 		return nil
 	}
 	var createErr error
-	if s.Outbox != nil {
+	if s.Outbox != nil || s.Audit != nil {
 		createErr = s.DB.Transaction(create)
 	} else {
 		createErr = create(s.DB)
@@ -174,6 +179,9 @@ func (s *AuthService) SendOTP(email string) (*Auth, string, error) {
 			if err := tx.Create(&record).Error; err != nil {
 				return err
 			}
+			if err := s.auditUser(tx, user, "SEND_OTP"); err != nil {
+				return err
+			}
 			_, err := s.Outbox.Put(tx, notificationcontract.Command{Producer: "identity", Key: fmt.Sprintf("password-reset:%d", record.ID), Kind: "otp", CreatedAt: record.CreatedAt, Deadline: record.CreatedAt.Add(10 * time.Minute)}, notificationcontract.Payload{To: user.Email, Subject: "OTP to change password", HTML: fmt.Sprintf("<p>Your password reset code is <strong>%s</strong>. It expires in 10 minutes.</p>", otp)})
 			return err
 		})
@@ -230,6 +238,9 @@ func (s *AuthService) ResetPassword(email, code, newPassword string) (*Auth, err
 	if s.Outbox != nil {
 		err := s.DB.Transaction(func(tx *gorm.DB) error {
 			if err := tx.Model(&Auth{}).Where("email = ?", email).Update("password", hashed).Error; err != nil {
+				return err
+			}
+			if err := s.auditUser(tx, user, "RESET_PASSWORD"); err != nil {
 				return err
 			}
 			return s.Outbox.Send(tx, "identity", fmt.Sprintf("password-changed:%d:%d", user.ID, time.Now().UnixNano()), []string{user.Email}, "Your password has been changed", BuildPasswordChangedEmailBody(user.FirstName, user.LastName))

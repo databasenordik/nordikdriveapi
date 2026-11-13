@@ -16,7 +16,13 @@ func (s *FileService) enqueueReviewTx(tx *gorm.DB, request *FileEditRequest) err
 		}
 	}
 	var user auth.Auth
-	if err := tx.First(&user, "id = ?", request.UserID).Error; err != nil {
+	if s.Directory != nil {
+		p, found := s.reviewRecipients[int64(request.UserID)]
+		if !found {
+			return fmt.Errorf("review recipient must be prepared before the transaction")
+		}
+		user = auth.Auth{ID: int(p.ID), FirstName: p.Firstname, LastName: p.Lastname, Email: p.Email}
+	} else if err := tx.First(&user, "id = ?", request.UserID).Error; err != nil {
 		return err
 	}
 	var details []FileEditRequestDetails
@@ -29,6 +35,13 @@ func (s *FileService) enqueueReviewTx(tx *gorm.DB, request *FileEditRequest) err
 
 // RecoverReviewIntent covers actionable pre-migration rows without resending true flags.
 func (s *FileService) RecoverReviewIntent(id uint) (string, error) {
+	if s.Directory != nil {
+		prepared, err := s.prepareReviewRecipient(id)
+		if err != nil {
+			return "", err
+		}
+		s = prepared
+	}
 	var key string
 	err := s.DB.Transaction(func(tx *gorm.DB) error {
 		query := tx

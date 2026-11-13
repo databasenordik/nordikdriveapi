@@ -1,23 +1,10 @@
 package logs
 
 import (
-	"time"
-
-	"github.com/lib/pq"
+	"nordik-drive-api/internal/activity"
 )
 
-type SystemLog struct {
-	ID          uint           `gorm:"primaryKey;autoIncrement" json:"id"`
-	Level       string         `gorm:"size:20;not null" json:"level"`
-	Service     string         `gorm:"size:100;not null" json:"service"`
-	UserID      *uint          `gorm:"index" json:"user_id,omitempty"`
-	Action      string         `gorm:"size:255;not null" json:"action"`
-	Message     string         `gorm:"type:text;not null" json:"message"`
-	Filename    *string        `gorm:"size:512" json:"filename,omitempty"`
-	Communities pq.StringArray `gorm:"type:text[];column:communities" json:"communities"`
-	Metadata    *string        `gorm:"type:jsonb" json:"metadata,omitempty"`
-	CreatedAt   time.Time      `gorm:"autoCreateTime" json:"created_at"`
-}
+type SystemLog = activity.Log
 
 type LogFilterInput struct {
 	UserID      *uint    `json:"user_id"`
@@ -58,8 +45,4 @@ type LogRow struct {
 	SystemLog
 	Firstname string `json:"firstname" gorm:"column:firstname"`
 	Lastname  string `json:"lastname" gorm:"column:lastname"`
-}
-
-func (SystemLog) TableName() string {
-	return "logs"
 }

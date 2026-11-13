@@ -60,7 +60,7 @@ resource "google_cloud_run_v2_service_iam_member" "notification_source_reader" {
 
 resource "google_cloud_tasks_queue_iam_member" "notification_event_producer" {
   for_each = local.notification_events_runtime ? {
-    for pair in setproduct(["legacy", "worker"], ["otp", "normal"]) : "${pair[0]}:${pair[1]}" => pair
+    for pair in setproduct(concat(["legacy", "worker"], var.enable_identity ? ["identity"] : []), ["otp", "normal"]) : "${pair[0]}:${pair[1]}" => pair
   } : {}
   project  = var.project_id
   location = var.region
@@ -70,7 +70,7 @@ resource "google_cloud_tasks_queue_iam_member" "notification_event_producer" {
 }
 
 resource "google_service_account_iam_member" "notification_event_task_identity" {
-  for_each           = local.notification_events_runtime ? toset(["legacy", "worker"]) : toset([])
+  for_each           = local.notification_events_runtime ? toset(concat(["legacy", "worker"], var.enable_identity ? ["identity"] : [])) : toset([])
   service_account_id = google_service_account.runtime["tasks"].name
   role               = "roles/iam.serviceAccountUser"
   member             = "serviceAccount:${google_service_account.runtime[each.key].email}"

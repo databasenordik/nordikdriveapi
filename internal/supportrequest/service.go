@@ -15,6 +15,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"nordik-drive-api/internal/identityclient"
 	"nordik-drive-api/internal/mailer"
 	"nordik-drive-api/internal/notificationcontract"
 	"nordik-drive-api/internal/outbox"
@@ -32,6 +33,7 @@ type SupportRequestService struct {
 	Mailer                 SupportRequestMailer
 	NotificationRecipients []string
 	Outbox                 *outbox.Writer
+	Directory              identityclient.Directory
 }
 
 type preparedScreenshot struct {
@@ -248,6 +250,17 @@ func (s *SupportRequestService) Create(
 }
 
 func (s *SupportRequestService) lookupUser(userID int) (*SupportRequestUserRef, error) {
+	if s.Directory != nil {
+		profiles, err := s.Directory.Profiles(requestscope.Context(s.DB), []int64{int64(userID)}, true)
+		if err != nil {
+			return nil, err
+		}
+		p, found := profiles[int64(userID)]
+		if !found {
+			return nil, gorm.ErrRecordNotFound
+		}
+		return &SupportRequestUserRef{ID: int(p.ID), FirstName: p.Firstname, LastName: p.Lastname, Email: p.Email}, nil
+	}
 	var user SupportRequestUserRef
 	if err := s.DB.First(&user, userID).Error; err != nil {
 		return nil, err
@@ -572,6 +585,20 @@ func (s *SupportRequestService) triggerManagementNotificationsAsync(
 }
 
 func (s *SupportRequestService) ensureAdmin(userID int) error {
+	if s.Directory != nil {
+		if userID <= 0 {
+			return ErrSupportRequestForbidden
+		}
+		principals, err := s.Directory.Principals(requestscope.Context(s.DB), []int64{int64(userID)})
+		if err != nil {
+			return err
+		}
+		principal, found := principals[int64(userID)]
+		if !found || !strings.EqualFold(principal.Role, "admin") {
+			return ErrSupportRequestForbidden
+		}
+		return nil
+	}
 	if userID <= 0 {
 		return ErrSupportRequestForbidden
 	}

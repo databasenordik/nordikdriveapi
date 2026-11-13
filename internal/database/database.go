@@ -9,7 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/url"
-	"regexp"
+	"os"
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn"
@@ -73,17 +73,16 @@ func Open(ctx context.Context, cfg config.Config) (*gorm.DB, func(), error) {
 		}
 	}
 	pgConfig.Tracer = queryTracer{}
-	schema := cfg.DBSchema
-	if schema == "" {
-		schema = "public"
-	}
-	if !regexp.MustCompile(`^[a-z][a-z0-9_]{0,62}$`).MatchString(schema) {
+	schema, schemaErr := validatedSearchPath(cfg.DBSchema)
+	label, labelErr := ApplicationName(cfg.RuntimeRole, os.Getenv("K_REVISION"), os.Getenv("CLOUD_RUN_EXECUTION"))
+	if schemaErr != nil || labelErr != nil {
 		if dialer != nil {
 			_ = dialer.Close()
 		}
-		return nil, nil, errors.New("DB_SCHEMA must be a lowercase SQL identifier")
+		return nil, nil, errors.New("invalid database schema or runtime label")
 	}
 	pgConfig.RuntimeParams["search_path"] = schema
+	pgConfig.RuntimeParams["application_name"] = label
 	pool := stdlib.OpenDB(*pgConfig)
 	maxOpen := cfg.DBMaxOpen
 	if maxOpen <= 0 {

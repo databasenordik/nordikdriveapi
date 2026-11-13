@@ -21,6 +21,7 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+	"nordik-drive-api/internal/auditoutbox"
 	"nordik-drive-api/internal/notificationcontract"
 	"nordik-drive-api/internal/outbox"
 	"nordik-drive-api/internal/util"
@@ -78,6 +79,7 @@ type SignupResult struct {
 	OutboxID    string       `json:"-"`
 }
 type SignupVerifier struct {
+	Audit  *auditoutbox.Writer
 	DB     *gorm.DB
 	Outbox *outbox.Writer
 	Keys   map[string][]byte
@@ -396,6 +398,9 @@ func (s *SignupVerifier) Create(ctx context.Context, user Auth, proof, key strin
 			if strings.Contains(err.Error(), "duplicate key") || strings.Contains(strings.ToLower(err.Error()), "unique constraint") {
 				return SignupResult{}, &SignupError{Status: 409, Message: "An account with this email already exists. Please log in."}
 			}
+			return SignupResult{}, err
+		}
+		if err := (&AuthService{Audit: s.Audit}).auditUser(tx, user, "SIGNUP"); err != nil {
 			return SignupResult{}, err
 		}
 		if err := s.Outbox.Send(tx, "identity", fmt.Sprintf("signup-welcome:%d", user.ID), []string{user.Email}, "Your database access account has been created", BuildSignupEmailBody(user.FirstName, user.LastName, user.Email)); err != nil {

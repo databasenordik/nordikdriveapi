@@ -2,6 +2,7 @@ package notificationcontract
 
 import (
 	"context"
+	"errors"
 
 	"golang.org/x/oauth2"
 )
@@ -37,4 +38,62 @@ func (s *SourceClient) Read(ctx context.Context, id string) (SourceRecord, error
 
 func (s *SourceClient) Receipt(ctx context.Context, receipt SourceReceipt) error {
 	return s.client.call(ctx, "/internal/v1/notification-outbox/receipt", receipt, nil)
+}
+
+type OwnerSource interface {
+	Read(context.Context, string) (SourceRecord, error)
+	Receipt(context.Context, SourceReceipt) error
+}
+
+// OwnerSources supports the compatibility window and transactional row move.
+// Only a successful authenticated owner response permits processing. A missing
+// row is distinct from an unavailable owner, and neither becomes a false ack.
+type OwnerSources []OwnerSource
+
+func (sources OwnerSources) Read(ctx context.Context, id string) (SourceRecord, error) {
+	var unavailable bool
+	for _, source := range sources {
+		if err := ctx.Err(); err != nil {
+			return SourceRecord{}, err
+		}
+		if source == nil {
+			unavailable = true
+			continue
+		}
+		record, err := source.Read(ctx, id)
+		if err == nil {
+			return record, nil
+		}
+		if !errors.Is(err, ErrNotFound) {
+			unavailable = true
+		}
+	}
+	if unavailable {
+		return SourceRecord{}, errors.New("notification owner source unavailable")
+	}
+	return SourceRecord{}, ErrNotFound
+}
+
+func (sources OwnerSources) Receipt(ctx context.Context, receipt SourceReceipt) error {
+	var unavailable bool
+	for _, source := range sources {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if source == nil {
+			unavailable = true
+			continue
+		}
+		err := source.Receipt(ctx, receipt)
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, ErrNotFound) {
+			unavailable = true
+		}
+	}
+	if unavailable {
+		return errors.New("notification owner receipt unavailable")
+	}
+	return ErrNotFound
 }

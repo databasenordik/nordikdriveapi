@@ -11,6 +11,7 @@ import (
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+	"nordik-drive-api/internal/identityclient"
 	"nordik-drive-api/internal/outbox"
 )
 
@@ -35,6 +36,8 @@ type Service struct {
 	MeetingProvider        MeetingProvider
 	HRAvailabilityProvider HRAvailabilityProvider
 	Outbox                 *outbox.Writer
+	Directory              identityclient.Directory
+	identitySnapshot       *supportIdentitySnapshot
 }
 
 func (s *Service) now() time.Time {
@@ -241,6 +244,13 @@ func isSupportBusinessDay(date string) bool {
 // next 14 calendar days. Repeated invocations only fill a genuinely missing
 // date, which makes startup and the daily job idempotent.
 func (s *Service) EnsureRollingSchedule() error {
+	if s.Directory != nil && s.identitySnapshot == nil {
+		prepared, err := s.prepareIdentity(userScope{})
+		if err != nil {
+			return err
+		}
+		s = prepared
+	}
 	if err := s.ensureInitialSupportTeam(); err != nil {
 		return err
 	}
@@ -327,9 +337,12 @@ func (s *Service) ListSchedule(from, to string) ([]SupportAssignment, error) {
 		to = scheduleDateFor(s.now().In(loc).AddDate(0, 0, DefaultHorizonDays-1), loc)
 	}
 	var assignments []SupportAssignment
-	err = s.DB.Preload("PrimaryAssignee").Preload("PreviousAssignee").
+	err = s.DB.Scopes(s.userPreload("PrimaryAssignee")).Scopes(s.userPreload("PreviousAssignee")).
 		Where("assignment_date >= ? AND assignment_date <= ?", from, to).
 		Order("assignment_date ASC").Find(&assignments).Error
+	if err == nil {
+		err = s.hydrate(s.DB, assignmentsTargets(assignments))
+	}
 	return assignments, err
 }
 
@@ -341,6 +354,17 @@ func (s *Service) ListScheduleFor(actorID uint, from, to string) ([]SupportAssig
 }
 
 func (s *Service) user(userID uint) (*SupportUser, error) {
+	if s.Directory != nil {
+		users, err := s.identityUsers(s.DB, []uint{userID})
+		if err != nil {
+			return nil, err
+		}
+		user, found := users[userID]
+		if !found {
+			return nil, ErrNotFound
+		}
+		return &user, nil
+	}
 	var user SupportUser
 	if err := s.DB.First(&user, userID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -406,7 +430,10 @@ func (s *Service) ListTeam(actorID uint) ([]SupportTeamMember, error) {
 		return nil, err
 	}
 	var members []SupportTeamMember
-	err := s.DB.Preload("User").Order("is_active DESC, user_id ASC").Find(&members).Error
+	err := s.DB.Scopes(s.userPreload("User")).Order("is_active DESC, user_id ASC").Find(&members).Error
+	if err == nil {
+		err = s.hydrate(s.DB, memberTargets(members))
+	}
 	return members, err
 }
 
@@ -415,7 +442,10 @@ func (s *Service) ListSelectableStaff() ([]SupportStaffOption, error) {
 		return nil, err
 	}
 	var members []SupportTeamMember
-	if err := s.DB.Preload("User").Where("is_active = ?", true).Order("user_id ASC").Find(&members).Error; err != nil {
+	if err := s.DB.Scopes(s.userPreload("User")).Where("is_active = ?", true).Order("user_id ASC").Find(&members).Error; err != nil {
+		return nil, err
+	}
+	if err := s.hydrate(s.DB, memberTargets(members)); err != nil {
 		return nil, err
 	}
 	result := make([]SupportStaffOption, 0, len(members))
@@ -432,6 +462,21 @@ func (s *Service) ListSelectableStaff() ([]SupportStaffOption, error) {
 // yet. Once any membership row exists, explicit manager configuration is
 // respected (including inactive members).
 func (s *Service) ensureInitialSupportTeam() error {
+	var preparedAdmins []SupportUser
+	if s.Directory != nil {
+		var configured int64
+		if err := s.DB.Model(&SupportTeamMember{}).Count(&configured).Error; err != nil {
+			return err
+		}
+		if configured > 0 {
+			return nil
+		}
+		var err error
+		preparedAdmins, err = s.roleUsers(s.DB, RoleAdmin)
+		if err != nil {
+			return err
+		}
+	}
 	return s.DB.Transaction(func(tx *gorm.DB) error {
 		var configuredMembers int64
 		if err := tx.Model(&SupportTeamMember{}).Count(&configuredMembers).Error; err != nil {
@@ -441,9 +486,13 @@ func (s *Service) ensureInitialSupportTeam() error {
 			return nil
 		}
 
-		var admins []SupportUser
-		if err := tx.Where("LOWER(role) = ?", strings.ToLower(RoleAdmin)).Find(&admins).Error; err != nil {
-			return err
+		admins := preparedAdmins
+		if s.Directory == nil {
+			var err error
+			admins, err = s.roleUsers(tx, RoleAdmin)
+			if err != nil {
+				return err
+			}
 		}
 		for _, admin := range admins {
 			member := SupportTeamMember{UserID: admin.ID, IsActive: true}
@@ -515,7 +564,10 @@ func (s *Service) pickFairStaffTx(tx *gorm.DB, date string, excluded map[uint]st
 
 func (s *Service) fairStaffCandidatesTx(tx *gorm.DB, date string, excluded map[uint]struct{}) ([]fairStaffCandidate, error) {
 	var members []SupportTeamMember
-	if err := tx.Preload("User").Where("is_active = ?", true).Find(&members).Error; err != nil {
+	if err := tx.Scopes(s.userPreload("User")).Where("is_active = ?", true).Find(&members).Error; err != nil {
+		return nil, err
+	}
+	if err := s.hydrate(tx, memberTargets(members)); err != nil {
 		return nil, err
 	}
 	candidates := make([]fairStaffCandidate, 0, len(members))
@@ -566,7 +618,10 @@ func (s *Service) ListFairnessStats(actorID uint) ([]FairnessStat, error) {
 		return nil, err
 	}
 	var members []SupportTeamMember
-	if err := s.DB.Preload("User").Where("is_active = ?", true).Find(&members).Error; err != nil {
+	if err := s.DB.Scopes(s.userPreload("User")).Where("is_active = ?", true).Find(&members).Error; err != nil {
+		return nil, err
+	}
+	if err := s.hydrate(s.DB, memberTargets(members)); err != nil {
 		return nil, err
 	}
 	users := make(map[uint]SupportUser, len(members))

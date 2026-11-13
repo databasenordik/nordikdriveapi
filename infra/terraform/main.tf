@@ -7,16 +7,16 @@ locals {
     var.deployment_stage == "cutover" && var.public_gateway_service_name != null ? { public = var.public_gateway_service_name } : {},
   ) : {}
   gateway_deployment_count = length(local.gateway_deployments)
-  roles                    = setunion(toset(["gateway", "legacy", "worker", "scheduler", "migrations"]), var.enable_notifications ? toset(["notifications", "tasks"]) : toset([]), var.enable_file_version_events ? toset(["work-tasks"]) : toset([]))
-  sql_owners               = setunion(toset(["gateway", "legacy", "worker", "migrations"]), var.enable_notifications ? toset(["notifications"]) : toset([]))
-  runtime_owners           = setunion(toset(["gateway", "legacy", "worker"]), var.enable_notifications ? toset(["notifications"]) : toset([]))
+  roles                    = setunion(toset(["gateway", "legacy", "worker", "scheduler", "migrations"]), var.enable_notifications ? toset(["notifications", "tasks"]) : toset([]), var.enable_file_version_events ? toset(["work-tasks"]) : toset([]), var.enable_identity ? toset(["identity"]) : toset([]), var.enable_audit ? toset(["audit", "audit-tasks"]) : toset([]))
+  sql_owners               = setunion(toset(["gateway", "legacy", "worker", "migrations"]), var.enable_notifications ? toset(["notifications"]) : toset([]), var.enable_identity ? toset(["identity"]) : toset([]), var.enable_audit ? toset(["audit"]) : toset([]))
+  runtime_owners           = setunion(toset(["gateway", "legacy", "worker"]), var.enable_notifications ? toset(["notifications"]) : toset([]), var.enable_identity ? toset(["identity"]) : toset([]), var.enable_audit ? toset(["audit"]) : toset([]))
   pools = {
     gateway = var.db_pool_limits.gateway
     legacy  = var.db_pool_limits.legacy
     worker  = var.db_pool_limits.worker
   }
-  runtime_connections   = sum([for owner, pool in local.pools : pool * var.max_instances[owner] * (owner == "gateway" ? local.gateway_deployment_count : 1)]) + local.notification_connections
-  rollout_connections   = sum([for owner, pool in local.pools : pool * var.rollout_extra_instances[owner] * (owner == "gateway" ? local.gateway_deployment_count : 1)]) + local.notification_connections
+  runtime_connections   = sum([for owner, pool in local.pools : pool * var.max_instances[owner] * (owner == "gateway" ? local.gateway_deployment_count : 1)]) + local.notification_connections + local.extracted_connections
+  rollout_connections   = var.serialized_runtime_rollouts ? max(concat([for owner, pool in local.pools : pool * var.rollout_extra_instances[owner] * (owner == "gateway" ? local.gateway_deployment_count : 1)], [local.notification_connections, local.extracted_connections > 0 ? 1 : 0])...) : sum([for owner, pool in local.pools : pool * var.rollout_extra_instances[owner] * (owner == "gateway" ? local.gateway_deployment_count : 1)]) + local.notification_connections + local.extracted_connections
   allocated_connections = local.runtime_connections + local.rollout_connections + var.db_pool_limits.cleanup + local.signup_cleanup_connections + var.other_reserved_connections
   connection_budget_limit = min(
     floor(var.database_connection_capacity * 0.8),
@@ -27,11 +27,11 @@ locals {
     gateway = merge(lookup(var.runtime_secrets, "gateway", {}), {
       JWT_SECRET = var.jwt_secret
     })
-    legacy = merge(lookup(var.runtime_secrets, "legacy", {}), {
+    legacy = merge({ for key, value in lookup(var.runtime_secrets, "legacy", {}) : key => value if !(var.identity_outbox_exclusive && key == "SIGNUP_VERIFICATION_KEYS") }, {
       JWT_SECRET = var.jwt_secret
     })
     worker = lookup(var.runtime_secrets, "worker", {})
-  }, var.enable_notifications ? { notifications = lookup(var.runtime_secrets, "notifications", {}) } : {})
+  }, var.enable_notifications ? { notifications = lookup(var.runtime_secrets, "notifications", {}) } : {}, var.enable_identity ? { identity = merge(lookup(var.runtime_secrets, "identity", {}), { JWT_SECRET = var.jwt_secret }) } : {}, var.enable_audit ? { audit = { JWT_SECRET = var.jwt_secret } } : {})
   secret_pairs = {
     for item in flatten([for owner, secrets in local.secrets : [for env, secret in secrets : merge(secret, {
       owner = owner, env = env
@@ -49,7 +49,7 @@ locals {
 
   }
   common_env = {
-    DB_AUTH_MODE = "iam", CLOUD_SQL_INSTANCE = var.sql_connection_name, CLOUD_SQL_IP_TYPE = var.sql_ip_type, DB_NAME = var.database_name, GOOGLE_CLOUD_PROJECT = var.project_id, APP_TIMEZONE = "America/Toronto", OTEL_EXPORTER = "gcp"
+    DB_APPLICATION_LABEL_VERSION = "1", DB_AUTH_MODE = "iam", CLOUD_SQL_INSTANCE = var.sql_connection_name, CLOUD_SQL_IP_TYPE = var.sql_ip_type, DB_NAME = var.database_name, GOOGLE_CLOUD_PROJECT = var.project_id, APP_TIMEZONE = "America/Toronto", OTEL_EXPORTER = "gcp"
   }
 
 }
@@ -136,7 +136,7 @@ resource "terraform_data" "safeguards" {
 
 resource "google_project_service" "apis" {
 
-  for_each           = setunion(toset(["run.googleapis.com", "sqladmin.googleapis.com", "secretmanager.googleapis.com", "cloudscheduler.googleapis.com", "iamcredentials.googleapis.com", "cloudtrace.googleapis.com", "monitoring.googleapis.com"]), var.enable_notifications || var.enable_file_version_events ? toset(["cloudtasks.googleapis.com"]) : toset([]))
+  for_each           = setunion(toset(["run.googleapis.com", "sqladmin.googleapis.com", "secretmanager.googleapis.com", "cloudscheduler.googleapis.com", "iamcredentials.googleapis.com", "cloudtrace.googleapis.com", "monitoring.googleapis.com"]), var.enable_notifications || var.enable_file_version_events || var.enable_audit ? toset(["cloudtasks.googleapis.com"]) : toset([]))
   service            = each.key
   disable_on_destroy = false
 
@@ -164,7 +164,7 @@ resource "google_sql_user" "iam" {
   name       = trimsuffix(google_service_account.runtime[each.key].email, ".gserviceaccount.com")
   instance   = var.sql_instance_name
   type       = "CLOUD_IAM_SERVICE_ACCOUNT"
-  depends_on = [terraform_data.safeguards, google_project_service.apis, google_project_iam_member.sql]
+  depends_on = [terraform_data.runtime_staging_safeguards, terraform_data.serialized_rollout_safeguards, terraform_data.safeguards, google_project_service.apis, google_project_iam_member.sql]
   lifecycle { prevent_destroy = true }
 
 }
@@ -226,12 +226,30 @@ resource "google_cloud_run_v2_service" "backend" {
   deletion_protection = true
   ingress             = "INGRESS_TRAFFIC_ALL"
   custom_audiences = each.key == "legacy" && var.enable_notification_source ? [local.notification_outbox_source_url] : (
-    each.key == "worker" && var.enable_file_version_events ? [local.file_version_worker_url] : []
+    each.key == "worker" && (var.enable_file_version_events || var.rollout_inspection_enabled) ? [local.worker_url] : []
   )
   scaling {
     max_instance_count = var.max_instances[each.key]
   }
+  dynamic "traffic" {
+    for_each = contains(keys(var.runtime_serving_revisions), each.key) ? [1] : []
+    content {
+      type     = "TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION"
+      revision = var.runtime_serving_revisions[each.key]
+      percent  = 100
+    }
+  }
+  dynamic "traffic" {
+    for_each = contains(keys(var.runtime_candidate_revisions), each.key) ? [1] : []
+    content {
+      type     = "TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION"
+      revision = var.runtime_candidate_revisions[each.key]
+      percent  = 0
+      tag      = "m4-candidate"
+    }
+  }
   template {
+    revision = lookup(var.runtime_candidate_revisions, each.key, lookup(var.runtime_template_revisions, each.key, null))
 
     service_account                  = google_service_account.runtime[each.key].email
     timeout                          = each.key == "worker" ? "930s" : "330s"
@@ -274,7 +292,7 @@ resource "google_cloud_run_v2_service" "backend" {
       }
       dynamic "env" {
 
-        for_each = merge(lookup(var.runtime_settings, each.key, {}), local.common_env, local.notification_producer_env, each.key == "legacy" ? local.notification_source_env : {}, local.notification_event_env, local.file_version_event_env, var.enable_notifications ? { SIGNUP_REQUIRE_VERIFIED_EMAIL = tostring(each.key == "legacy" && var.signup_require_verified_email) } : {}, {
+        for_each = merge(lookup(var.runtime_settings, each.key, {}), local.common_env, local.notification_producer_env, each.key == "legacy" ? local.notification_source_env : {}, local.notification_event_env, local.file_version_event_env, var.enable_notifications ? { SIGNUP_REQUIRE_VERIFIED_EMAIL = tostring(each.key == "legacy" && var.signup_require_verified_email) } : {}, local.ownership_backend_env[each.key], {
 
           APP_ROLE                  = each.key == "worker" ? "worker" : "monolith"
           SCHEDULER_MODE            = "external"
@@ -323,7 +341,7 @@ resource "google_cloud_run_v2_service" "backend" {
     }
 
   }
-  depends_on = [terraform_data.safeguards, google_project_service.apis, google_project_iam_member.sql, google_secret_manager_secret_iam_member.runtime]
+  depends_on = [terraform_data.runtime_staging_safeguards, terraform_data.serialized_rollout_safeguards, terraform_data.safeguards, google_project_service.apis, google_project_iam_member.sql, google_secret_manager_secret_iam_member.runtime]
   lifecycle { prevent_destroy = true }
 
 }
@@ -353,7 +371,17 @@ resource "google_cloud_run_v2_service" "gateway" {
       tag     = "milestone2"
     }
   }
+  dynamic "traffic" {
+    for_each = each.key == "public" && contains(keys(var.runtime_candidate_revisions), "gateway") ? [1] : []
+    content {
+      type     = "TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION"
+      revision = var.runtime_candidate_revisions["gateway"]
+      percent  = 0
+      tag      = "m4-candidate"
+    }
+  }
   template {
+    revision = each.key == "public" ? lookup(var.runtime_candidate_revisions, "gateway", lookup(var.runtime_template_revisions, "gateway", null)) : null
 
     service_account                  = google_service_account.runtime["gateway"].email
     timeout                          = "330s"
@@ -446,7 +474,7 @@ resource "google_cloud_run_v2_service" "gateway" {
           ENVOY_CONFIG_PATH       = "/shared/envoy.json"
           LEGACY_BACKEND_URL      = google_cloud_run_v2_service.backend["legacy"].uri
           LEGACY_BACKEND_AUDIENCE = google_cloud_run_v2_service.backend["legacy"].uri
-          SERVICE_BACKENDS_JSON   = jsonencode(var.service_backends)
+          SERVICE_BACKENDS_JSON   = jsonencode(local.extracted_backends)
           RATE_LIMIT_MODE         = var.rate_limit_mode
           CLIENT_IP_MODE          = "forwarded"
           TRUSTED_PROXY_HOPS      = tostring(var.trusted_proxy_hops)
@@ -491,8 +519,11 @@ resource "google_cloud_run_v2_service" "gateway" {
     }
 
   }
-  depends_on = [terraform_data.safeguards, google_project_iam_member.sql, google_secret_manager_secret_iam_member.runtime]
-  lifecycle { prevent_destroy = true }
+  depends_on = [terraform_data.runtime_staging_safeguards, terraform_data.serialized_rollout_safeguards, terraform_data.safeguards, google_project_iam_member.sql, google_secret_manager_secret_iam_member.runtime]
+  lifecycle {
+    prevent_destroy = true
+    ignore_changes  = [annotations["nordikdrive.io/runtime-rollout"]]
+  }
 
 }
 
@@ -646,7 +677,7 @@ resource "google_cloud_run_v2_job" "cleanup" {
     }
 
   }
-  depends_on = [terraform_data.safeguards, google_project_iam_member.sql]
+  depends_on = [terraform_data.runtime_staging_safeguards, terraform_data.serialized_rollout_safeguards, terraform_data.safeguards, google_project_iam_member.sql]
   lifecycle { prevent_destroy = true }
 
 }

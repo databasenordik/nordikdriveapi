@@ -10,8 +10,11 @@ import (
 
 func (s *FormSubmissionService) enqueueReviewTx(tx *gorm.DB, id int64, newDecision bool) error {
 	var sub FormSubmission
-	if err := tx.Preload("CreatedByUser").First(&sub, "id = ?", id).Error; err != nil {
+	if err := tx.Scopes(s.userPreload("CreatedByUser")).First(&sub, "id = ?", id).Error; err != nil {
 		return err
+	}
+	if s.Directory != nil {
+		sub.CreatedByUser = s.preparedCreator(sub.CreatedByID)
 	}
 	if sub.Status == "pending" && !newDecision {
 		return nil
@@ -21,7 +24,7 @@ func (s *FormSubmissionService) enqueueReviewTx(tx *gorm.DB, id int64, newDecisi
 	}
 	if newDecision || sub.ReviewNotificationKey == "" {
 		sub.ReviewNotificationKey = uuid.NewString()
-		if err := tx.Model(&sub).Updates(map[string]any{"review_notification_key": sub.ReviewNotificationKey, "review_email_trigger_success": false}).Error; err != nil {
+		if err := tx.Omit(clause.Associations).Model(&sub).Updates(map[string]any{"review_notification_key": sub.ReviewNotificationKey, "review_email_trigger_success": false}).Error; err != nil {
 			return err
 		}
 	}
@@ -29,6 +32,13 @@ func (s *FormSubmissionService) enqueueReviewTx(tx *gorm.DB, id int64, newDecisi
 	return s.Outbox.Send(tx, "records", "form-review:"+sub.ReviewNotificationKey, []string{sub.CreatedByUser.Email}, fmt.Sprintf("Update to your submission for %s", sub.FormLabel), body)
 }
 func (s *FormSubmissionService) RecoverReviewIntent(id int64) (string, error) {
+	if s.Directory != nil {
+		prepared, err := s.prepareReviewRecipient(id)
+		if err != nil {
+			return "", err
+		}
+		s = prepared
+	}
 	var key string
 	err := s.DB.Transaction(func(tx *gorm.DB) error {
 		query := tx

@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 
 	"nordik-drive-api/internal/formsubmission"
+	"nordik-drive-api/internal/identityclient"
 	"nordik-drive-api/internal/mailer"
 	"nordik-drive-api/internal/outbox"
 	"nordik-drive-api/internal/requestscope"
@@ -20,17 +22,20 @@ type FormSubmissionReviewEmailJob struct {
 	BatchSize int
 	Outbox    *outbox.Writer
 	Remote    outbox.Remote
+	Directory identityclient.Directory
 }
 
 type formSubmissionReviewEmailRow struct {
-	ID               int64  `gorm:"column:id"`
-	FormLabel        string `gorm:"column:form_label"`
-	Status           string `gorm:"column:status"`
-	FirstName        string `gorm:"column:firstname"`
-	LastName         string `gorm:"column:lastname"`
-	ReviewerComment  string `gorm:"column:reviewer_comment"`
-	CreatedUserEmail string `gorm:"column:created_user_email"`
-	CreatedUserName  string `gorm:"column:created_user_name"`
+	CreatedAt        *time.Time `gorm:"column:created_at"`
+	CreatedByID      int64      `gorm:"column:created_by"`
+	ID               int64      `gorm:"column:id"`
+	FormLabel        string     `gorm:"column:form_label"`
+	Status           string     `gorm:"column:status"`
+	FirstName        string     `gorm:"column:firstname"`
+	LastName         string     `gorm:"column:lastname"`
+	ReviewerComment  string     `gorm:"column:reviewer_comment"`
+	CreatedUserEmail string     `gorm:"column:created_user_email"`
+	CreatedUserName  string     `gorm:"column:created_user_name"`
 }
 
 func NewFormSubmissionReviewEmailJob(
@@ -58,8 +63,7 @@ func (j *FormSubmissionReviewEmailJob) Run() error {
 	} else {
 		query = query.Where("form_submissions.status <> ? AND form_submissions.review_email_trigger_success = ?", "pending", false)
 	}
-	err := query.
-		Select(`
+	columns := `
 			form_submissions.id,
 			form_submissions.form_label,
 			form_submissions.status,
@@ -68,18 +72,36 @@ func (j *FormSubmissionReviewEmailJob) Run() error {
 			form_submissions.reviewer_comment,
 			u.email AS created_user_email,
 			TRIM(COALESCE(u.firstname, '') || ' ' || COALESCE(u.lastname, '')) AS created_user_name
-		`).
-		Joins("JOIN users u ON u.id = form_submissions.created_by").
-		Order("form_submissions.created_at ASC").
-		Limit(j.BatchSize).
-		Scan(&rows).Error
-	if err != nil {
-		return fmt.Errorf("failed to fetch form submissions pending review emails: %w", err)
+		`
+	if j.Directory != nil {
+		columns = "form_submissions.id,form_submissions.created_by,form_submissions.form_label,form_submissions.status,form_submissions.firstname,form_submissions.lastname,form_submissions.reviewer_comment,form_submissions.created_at"
+	} else {
+		query = query.Joins("JOIN users u ON u.id = form_submissions.created_by")
+	}
+
+	directory := j.Directory
+	var err error
+	if directory == nil {
+		err = query.Select(columns).Order("form_submissions.created_at ASC").Limit(j.BatchSize).Scan(&rows).Error
+		if err != nil {
+			return fmt.Errorf("failed to fetch form submissions pending review emails: %w", err)
+		}
+	} else {
+		var profiles map[int64]identityclient.Profile
+		rows, directory, profiles, err = ownedReviewRows(query, columns, "form_submissions.created_at", "form_submissions.id", j.BatchSize, directory, func(row formSubmissionReviewEmailRow) int64 { return int64(row.CreatedByID) }, func(row formSubmissionReviewEmailRow) (*time.Time, int64) { return row.CreatedAt, int64(row.ID) })
+		if err != nil {
+			return err
+		}
+		for i := range rows {
+			p := profiles[int64(rows[i].CreatedByID)]
+			rows[i].CreatedUserEmail = p.Email
+			rows[i].CreatedUserName = strings.Trim(p.Firstname+" "+p.Lastname, " ")
+		}
 	}
 
 	for _, row := range rows {
 		if j.Outbox != nil {
-			owner := &formsubmission.FormSubmissionService{DB: j.DB, Outbox: j.Outbox}
+			owner := &formsubmission.FormSubmissionService{DB: j.DB, Outbox: j.Outbox, Directory: directory}
 			key, err := owner.RecoverReviewIntent(row.ID)
 			if err != nil {
 				return err

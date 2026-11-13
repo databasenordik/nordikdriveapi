@@ -57,7 +57,13 @@ func (s *Service) notificationSnapshot(tx *gorm.DB, entity string, id *uint, act
 		}
 		if meta.Previous != nil {
 			var former SupportUser
-			if err := tx.First(&former, "id = ?", *meta.Previous).Error; err != nil {
+			if s.Directory != nil {
+				user, err := owner.user(*meta.Previous)
+				if err != nil {
+					return nil, err
+				}
+				former = *user
+			} else if err := tx.First(&former, "id = ?", *meta.Previous).Error; err != nil {
 				return nil, err
 			}
 			snapshot.Former = &former
@@ -68,7 +74,10 @@ func (s *Service) notificationSnapshot(tx *gorm.DB, entity string, id *uint, act
 		return nil, nil
 	}
 	var assignment SupportAssignment
-	if err := tx.Preload("PrimaryAssignee").Preload("PreviousAssignee").First(&assignment, "id = ?", *id).Error; err != nil {
+	if err := tx.Scopes(s.userPreload("PrimaryAssignee")).Scopes(s.userPreload("PreviousAssignee")).First(&assignment, "id = ?", *id).Error; err != nil {
+		return nil, err
+	}
+	if err := owner.hydrate(tx, assignmentTargets(&assignment)); err != nil {
 		return nil, err
 	}
 	var meta struct {
@@ -79,8 +88,8 @@ func (s *Service) notificationSnapshot(tx *gorm.DB, entity string, id *uint, act
 	}
 	snapshot := &supportNotificationSnapshot{Assignment: &assignment, Reason: meta.Reason}
 	users := []*SupportUser{assignment.PrimaryAssignee, assignment.PreviousAssignee}
-	var managers []SupportUser
-	if err := tx.Where("LOWER(role) = ?", strings.ToLower(RoleManager)).Find(&managers).Error; err != nil {
+	managers, err := owner.roleUsers(tx, RoleManager)
+	if err != nil {
 		return nil, err
 	}
 	for i := range managers {
@@ -103,6 +112,9 @@ func (s *Service) notificationSnapshot(tx *gorm.DB, entity string, id *uint, act
 	})
 	var requests []SupportCallRequest
 	if err := owner.requestQuery().Where("requested_date = ?", assignment.AssignmentDate).Find(&requests).Error; err != nil {
+		return nil, err
+	}
+	if err := owner.hydrate(tx, requestsTargets(requests)); err != nil {
 		return nil, err
 	}
 	for i := range requests {

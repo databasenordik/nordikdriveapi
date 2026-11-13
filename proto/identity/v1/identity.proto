@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+package nordik.identity.v1;
+option go_package = "nordik-drive-api/internal/identitypb;identitypb";
+
+service Identity {
+  rpc BatchGetProfiles(BatchGetProfilesRequest) returns (BatchGetProfilesResponse);
+  rpc BatchGetPrincipals(BatchGetPrincipalsRequest) returns (BatchGetPrincipalsResponse);
+  rpc SearchProfiles(SearchProfilesRequest) returns (SearchProfilesResponse);
+}
+
+message Profile {
+  int64 id = 1;
+  string firstname = 2;
+  string lastname = 3;
+  // Empty unless explicitly requested by an authorized recipient consumer.
+  string email = 4;
+}
+message Principal {
+  int64 id = 1;
+  string role = 2;
+  repeated string communities = 3;
+}
+message BatchGetProfilesRequest {
+  repeated int64 ids = 1;
+  bool include_email = 2;
+}
+message BatchGetProfilesResponse {
+  repeated Profile profiles = 1;
+  repeated int64 missing_ids = 2;
+}
+message BatchGetPrincipalsRequest { repeated int64 ids = 1; }
+message BatchGetPrincipalsResponse {
+  repeated Principal principals = 1;
+  repeated int64 missing_ids = 2;
+}
+message SearchProfilesRequest {
+  string query = 1;
+  int64 after_id = 2;
+  uint32 limit = 3;
+  // "parts" preserves separate firstname/lastname ILIKE matching;
+  // "full" preserves existing concatenated-name matching. SQL wildcards remain.
+  string match_mode = 4;
+  // Role filtering requires principal access; Audit cannot use this field.
+  string role = 5;
+}
+message SearchProfilesResponse {
+  repeated int64 ids = 1;
+  int64 next_after_id = 2;
+}

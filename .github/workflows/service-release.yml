@@ -1,4 +1,4 @@
-name: Build and stage one changed service
+name: Build and deploy one changed service
 on:
   workflow_call:
     inputs:
@@ -11,6 +11,7 @@ permissions:
   id-token: write
 concurrency:
   group: service-release-${{ inputs.service }}
+  queue: max
   cancel-in-progress: false
 jobs:
   build:

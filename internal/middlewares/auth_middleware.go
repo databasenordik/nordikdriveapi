@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"nordik-drive-api/config"
+	"nordik-drive-api/internal/activity"
 	"nordik-drive-api/internal/session"
 
 	"github.com/gin-gonic/gin"
@@ -34,6 +35,7 @@ func AuthMiddleware() gin.HandlerFunc {
 		communities = append(communities, claims.Communities...)
 		c.Set("userID", float64(claims.UserID))
 		c.Set("communities", communities)
+		c.Request = c.Request.WithContext(activity.WithActor(c.Request.Context(), uint(claims.UserID), communities))
 		c.Next()
 	}
 }

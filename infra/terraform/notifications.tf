@@ -120,7 +120,7 @@ resource "terraform_data" "notification_safeguards" {
 
     precondition {
 
-      condition = !var.signup_require_verified_email || (var.notification_delivery_enabled && contains(keys(lookup(var.runtime_secrets, "legacy", {
+      condition = !var.signup_require_verified_email || (var.notification_delivery_enabled && contains(keys(lookup(var.runtime_secrets, var.identity_public_enabled ? "identity" : "legacy", {
 
         }
       )), "SIGNUP_VERIFICATION_KEYS"))
@@ -154,7 +154,25 @@ resource "google_cloud_run_v2_service" "notifications" {
     max_instance_count = 1
   }
 
+  dynamic "traffic" {
+    for_each = contains(keys(var.runtime_serving_revisions), "notifications") ? [1] : []
+    content {
+      type     = "TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION"
+      revision = var.runtime_serving_revisions["notifications"]
+      percent  = 100
+    }
+  }
+  dynamic "traffic" {
+    for_each = contains(keys(var.runtime_candidate_revisions), "notifications") ? [1] : []
+    content {
+      type     = "TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION"
+      revision = var.runtime_candidate_revisions["notifications"]
+      percent  = 0
+      tag      = "m4-candidate"
+    }
+  }
   template {
+    revision = lookup(var.runtime_candidate_revisions, "notifications", lookup(var.runtime_template_revisions, "notifications", null))
 
     service_account                  = google_service_account.runtime["notifications"].email
     timeout                          = "40s"
@@ -201,7 +219,7 @@ resource "google_cloud_run_v2_service" "notifications" {
         for_each = merge(lookup(var.runtime_settings, "notifications", {
 
           }
-          ), local.common_env, var.enable_notification_source ? { NOTIFICATION_OUTBOX_SOURCE_URL = local.notification_outbox_source_url } : {}, {
+          ), local.common_env, local.notifications_identity_env, var.enable_notification_source ? { NOTIFICATION_OUTBOX_SOURCE_URL = local.notification_outbox_source_url } : {}, {
 
           DB_SCHEMA                        = "notifications"
           DB_USER                          = google_sql_user.iam["notifications"].name
@@ -260,7 +278,7 @@ resource "google_cloud_run_v2_service" "notifications" {
 
   }
 
-  depends_on = [terraform_data.safeguards, terraform_data.notification_safeguards, google_project_service.apis, google_project_iam_member.sql, google_secret_manager_secret_iam_member.runtime]
+  depends_on = [terraform_data.runtime_staging_safeguards, terraform_data.serialized_rollout_safeguards, terraform_data.safeguards, terraform_data.notification_safeguards, google_project_service.apis, google_project_iam_member.sql, google_secret_manager_secret_iam_member.runtime]
   lifecycle {
     prevent_destroy = true
   }
@@ -341,7 +359,7 @@ resource "google_service_account_iam_member" "notification_task_user" {
 
 resource "google_cloud_run_v2_service_iam_member" "notification_callers" {
 
-  for_each = local.notifications_runtime ? toset(["legacy", "worker", "tasks"]) : toset([])
+  for_each = local.notifications_runtime ? setunion(toset(["legacy", "worker", "tasks"]), var.enable_identity ? toset(["identity"]) : toset([])) : toset([])
   project  = var.project_id
   location = var.region
   name     = google_cloud_run_v2_service.notifications[0].name

@@ -2,6 +2,10 @@ package logs
 
 import (
 	"math"
+	"nordik-drive-api/internal/activity"
+	"nordik-drive-api/internal/auditoutbox"
+	"nordik-drive-api/internal/identityclient"
+	"nordik-drive-api/internal/requestscope"
 	"nordik-drive-api/internal/util"
 	"sort"
 	"strings"
@@ -12,10 +16,18 @@ import (
 )
 
 type LogService struct {
-	DB *gorm.DB
+	DB        *gorm.DB
+	Directory identityclient.Directory
+	Audit     *auditoutbox.Writer
 }
 
 func (ls *LogService) Log(log SystemLog, metadata interface{}) error {
+	if ls.Audit != nil {
+		if activity.Transactional(log.Action) {
+			return nil
+		}
+		return ls.Audit.Put(ls.DB, log, metadata)
+	}
 	metaStr := safeMetadata(metadata)
 
 	newLog := SystemLog{
@@ -44,10 +56,10 @@ func (ls *LogService) GetLogs(input LogFilterInput) ([]LogRow, LogAggregates, in
 	}
 
 	// Base query (joins users for name + supports search)
-	base := ls.DB.
-		Table("logs").
-		Select("logs.*, a.firstname as firstname, a.lastname as lastname").
-		Joins("LEFT JOIN users a ON logs.user_id = a.id")
+	base := ls.DB.Table("logs")
+	if ls.Directory == nil {
+		base = base.Select("logs.*, a.firstname as firstname, a.lastname as lastname").Joins("LEFT JOIN users a ON logs.user_id = a.id")
+	}
 
 	// Default: last 30 days if no dates
 	if input.StartDate == nil && input.EndDate == nil {
@@ -93,18 +105,26 @@ func (ls *LogService) GetLogs(input LogFilterInput) ([]LogRow, LogAggregates, in
 	// ✅ Search across multiple columns (including filename + communities + person name)
 	if input.Search != nil && strings.TrimSpace(*input.Search) != "" {
 		like := "%" + strings.TrimSpace(*input.Search) + "%"
-		base = base.Where(
-			`CAST(logs.id AS TEXT) ILIKE ?
+		search := `CAST(logs.id AS TEXT) ILIKE ?
 			 OR logs.level ILIKE ?
 			 OR logs.service ILIKE ?
 			 OR logs.action ILIKE ?
 			 OR logs.message ILIKE ?
 			 OR COALESCE(logs.filename,'') ILIKE ?
-			 OR COALESCE(array_to_string(logs.communities, ','),'') ILIKE ?
-			 OR COALESCE(a.firstname,'') ILIKE ?
-			 OR COALESCE(a.lastname,'') ILIKE ?`,
-			like, like, like, like, like, like, like, like, like,
-		)
+			 OR COALESCE(array_to_string(logs.communities, ','),'') ILIKE ?`
+		args := []any{like, like, like, like, like, like, like}
+		if ls.Directory != nil {
+			ids, err := ls.Directory.Search(requestscope.Context(ls.DB), strings.TrimSpace(*input.Search), "parts", "")
+			if err != nil {
+				return nil, LogAggregates{}, 0, 0, err
+			}
+			search += " OR logs.user_id = ANY(?)"
+			args = append(args, pq.Array(ids))
+		} else {
+			search += " OR COALESCE(a.firstname,'') ILIKE ? OR COALESCE(a.lastname,'') ILIKE ?"
+			args = append(args, like, like)
+		}
+		base = base.Where(search, args...)
 	}
 
 	// ✅ Total count (no paging)
@@ -134,6 +154,9 @@ func (ls *LogService) GetLogs(input LogFilterInput) ([]LogRow, LogAggregates, in
 	if err != nil {
 		return nil, LogAggregates{}, 0, 0, err
 	}
+	if err := ls.enrichPeople(rows, &aggs); err != nil {
+		return nil, LogAggregates{}, 0, 0, err
+	}
 
 	return rows, aggs, total, totalPages, nil
 }
@@ -143,8 +166,11 @@ func (ls *LogService) getAggregatesFromBase(base *gorm.DB) (LogAggregates, error
 	limit := 12
 
 	// Use derived table so filters are identical
-	sub := base.Session(&gorm.Session{}).
-		Select("logs.user_id, logs.filename, logs.communities, a.firstname, a.lastname")
+	columns := "logs.user_id, logs.filename, logs.communities, a.firstname, a.lastname"
+	if ls.Directory != nil {
+		columns = "logs.user_id, logs.filename, logs.communities, ''::text AS firstname, ''::text AS lastname"
+	}
+	sub := base.Session(&gorm.Session{}).Select(columns)
 
 	derived := ls.DB.Table("(?) as x", sub)
 
@@ -272,4 +298,48 @@ func (ls *LogService) getAggregatesFromBase(base *gorm.DB) (LogAggregates, error
 	}
 
 	return aggs, nil
+}
+
+func (ls *LogService) enrichPeople(rows []LogRow, aggs *LogAggregates) error {
+	if ls.Directory == nil {
+		return nil
+	}
+	ids := []int64{}
+	for _, row := range rows {
+		if row.UserID != nil {
+			ids = append(ids, int64(*row.UserID))
+		}
+	}
+	for _, row := range aggs.ByPerson {
+		if row.UserID != nil {
+			ids = append(ids, int64(*row.UserID))
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	profiles, err := ls.Directory.Profiles(requestscope.Context(ls.DB), ids, false)
+	if err != nil {
+		return err
+	}
+	for i := range rows {
+		if rows[i].UserID != nil {
+			p := profiles[int64(*rows[i].UserID)]
+			rows[i].Firstname = p.Firstname
+			rows[i].Lastname = p.Lastname
+		}
+	}
+	for i := range aggs.ByPerson {
+		row := &aggs.ByPerson[i]
+		if row.UserID != nil {
+			p := profiles[int64(*row.UserID)]
+			row.Firstname = p.Firstname
+			row.Lastname = p.Lastname
+		}
+		row.Label = "Unknown"
+		if row.Firstname != "" || row.Lastname != "" {
+			row.Label = strings.Trim(row.Firstname+" "+row.Lastname, " ")
+		}
+	}
+	return nil
 }

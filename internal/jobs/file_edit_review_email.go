@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 
 	filehelper "nordik-drive-api/internal/file"
+	"nordik-drive-api/internal/identityclient"
 	"nordik-drive-api/internal/mailer"
 	"nordik-drive-api/internal/outbox"
 	"nordik-drive-api/internal/requestscope"
@@ -20,17 +22,19 @@ type FileEditReviewEmailJob struct {
 	BatchSize int
 	Outbox    *outbox.Writer
 	Remote    outbox.Remote
+	Directory identityclient.Directory
 }
 
 type fileEditReviewEmailRow struct {
-	RequestID       uint   `gorm:"column:request_id"`
-	UserID          uint   `gorm:"column:user_id"`
-	Status          string `gorm:"column:status"`
-	FirstName       string `gorm:"column:firstname"`
-	LastName        string `gorm:"column:lastname"`
-	ReviewComment   string `gorm:"column:reviewer_comment"`
-	Email           string `gorm:"column:email"`
-	CreatedUserName string `gorm:"column:created_user_name"`
+	CreatedAt       *time.Time `gorm:"column:created_at"`
+	RequestID       uint       `gorm:"column:request_id"`
+	UserID          uint       `gorm:"column:user_id"`
+	Status          string     `gorm:"column:status"`
+	FirstName       string     `gorm:"column:firstname"`
+	LastName        string     `gorm:"column:lastname"`
+	ReviewComment   string     `gorm:"column:reviewer_comment"`
+	Email           string     `gorm:"column:email"`
+	CreatedUserName string     `gorm:"column:created_user_name"`
 }
 
 func NewFileEditReviewEmailJob(
@@ -60,8 +64,7 @@ func (j *FileEditReviewEmailJob) Run() error {
 	} else {
 		query = query.Where("fer.status <> ? AND fer.review_email_trigger_success = ?", "pending", false)
 	}
-	err := query.
-		Select(`
+	columns := `
 			fer.request_id,
 			fer.user_id,
 			fer.status,
@@ -70,18 +73,36 @@ func (j *FileEditReviewEmailJob) Run() error {
 			fer.reviewer_comment,
 			u.email,
 			TRIM(COALESCE(u.firstname, '') || ' ' || COALESCE(u.lastname, '')) AS created_user_name
-		`).
-		Joins("JOIN users u ON u.id = fer.user_id").
-		Order("fer.created_at ASC").
-		Limit(j.BatchSize).
-		Scan(&rows).Error
-	if err != nil {
-		return fmt.Errorf("failed to fetch file edit requests pending review emails: %w", err)
+		`
+	if j.Directory != nil {
+		columns = "fer.request_id,fer.user_id,fer.status,fer.firstname,fer.lastname,fer.reviewer_comment,fer.created_at"
+	} else {
+		query = query.Joins("JOIN users u ON u.id = fer.user_id")
+	}
+
+	directory := j.Directory
+	var err error
+	if directory == nil {
+		err = query.Select(columns).Order("fer.created_at ASC").Limit(j.BatchSize).Scan(&rows).Error
+		if err != nil {
+			return fmt.Errorf("failed to fetch file edit requests pending review emails: %w", err)
+		}
+	} else {
+		var profiles map[int64]identityclient.Profile
+		rows, directory, profiles, err = ownedReviewRows(query, columns, "fer.created_at", "fer.request_id", j.BatchSize, directory, func(row fileEditReviewEmailRow) int64 { return int64(row.UserID) }, func(row fileEditReviewEmailRow) (*time.Time, int64) { return row.CreatedAt, int64(row.RequestID) })
+		if err != nil {
+			return err
+		}
+		for i := range rows {
+			p := profiles[int64(rows[i].UserID)]
+			rows[i].Email = p.Email
+			rows[i].CreatedUserName = strings.Trim(p.Firstname+" "+p.Lastname, " ")
+		}
 	}
 
 	for _, row := range rows {
 		if j.Outbox != nil {
-			owner := &filehelper.FileService{DB: j.DB, Outbox: j.Outbox}
+			owner := &filehelper.FileService{DB: j.DB, Outbox: j.Outbox, Directory: directory}
 			key, err := owner.RecoverReviewIntent(row.RequestID)
 			if err != nil {
 				return err

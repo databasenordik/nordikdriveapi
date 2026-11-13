@@ -32,7 +32,17 @@ func (s *Service) meetingInput(tx *gorm.DB, request *SupportCallRequest, call *S
 		return MeetingInput{}, errors.New("support call does not have an assigned Zoom host")
 	}
 	var host SupportUser
-	if err := tx.First(&host, *call.AssignedStaffID).Error; err != nil {
+	if s.Directory != nil {
+		users, err := s.identityUsers(tx, []uint{*call.AssignedStaffID})
+		if err != nil {
+			return MeetingInput{}, err
+		}
+		var found bool
+		host, found = users[*call.AssignedStaffID]
+		if !found {
+			return MeetingInput{}, ErrNotFound
+		}
+	} else if err := tx.First(&host, *call.AssignedStaffID).Error; err != nil {
 		return MeetingInput{}, mapNotFound(err)
 	}
 	hostEmail := strings.TrimSpace(host.Email)
@@ -64,6 +74,13 @@ func (s *Service) syncZoomMeeting(callID uint) error {
 	settings, err := s.settings()
 	if err != nil {
 		return err
+	}
+	if s.Directory != nil {
+		prepared, err := s.prepareIdentity(userScope{Calls: []uint{callID}})
+		if err != nil {
+			return err
+		}
+		s = prepared
 	}
 	ctx, cancel := context.WithTimeout(requestscope.Context(s.DB), 25*time.Second)
 	defer cancel()

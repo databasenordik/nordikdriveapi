@@ -60,6 +60,11 @@ func TestPostgresInspectionCountsOldAndLabelledOwnersWithoutUserData(t *testing.
 	if err := pool.QueryRow("SELECT pg_has_role(current_user,'pg_read_all_stats','USAGE')").Scan(&broadStats); err != nil || broadStats {
 		t.Fatal("Worker must not receive broad statistics privileges", err)
 	}
+	// A caller-owned temporary relation must never shadow the real catalogue
+	// inside the SECURITY DEFINER function and manufacture false zero counts.
+	if _, err := pool.Exec("CREATE TEMP TABLE pg_stat_activity(application_name text,state text,usename text,datname text,backend_type text)"); err != nil {
+		t.Fatal(err)
+	}
 	foreign, err := admin.Conn(context.Background())
 	if err != nil {
 		t.Fatal(err)

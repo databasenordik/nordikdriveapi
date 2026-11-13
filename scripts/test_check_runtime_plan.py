@@ -36,6 +36,13 @@ class PlanScopeTests(unittest.TestCase):
             grant=change("google_cloud_run_v2_service_iam_member","nordikdriveapi-identity")
             grant["change"]["after"]["member"]=principal
             with self.assertRaises(r.Refused):self.verify([change(),grant])
+    def test_finite_job_configuration_is_separate_and_bounded(self):
+        cleanup=change("google_cloud_run_v2_job","nordikdriveapi-limit-cleanup")
+        self.assertEqual(self.verify([cleanup],"gateway",job_only=True),[])
+        for changes in ([cleanup,cleanup],[change(),cleanup],[],[change("google_cloud_run_v2_job","other")],[change("google_cloud_run_v2_job","nordikdriveapi-limit-cleanup",["create"]) ]):
+            with self.assertRaises(r.Refused):self.verify(changes,"gateway",job_only=True)
+        with self.assertRaises(r.Refused):self.verify([cleanup],"worker",job_only=True)
+        with self.assertRaises(r.Refused):self.verify([cleanup],"gateway",job_only=True,metadata_only=True)
 
 
 if __name__=="__main__":unittest.main()

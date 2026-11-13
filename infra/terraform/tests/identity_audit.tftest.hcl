@@ -144,10 +144,10 @@ run "audit_cannot_receive_smtp_or_payload_keys" {
   command = plan
   variables {
     runtime_secrets = {
-      audit = { GMAIL_APP_PASSWORD = { secret_id = "wrong-audit-smtp", version = "1" } }
+      audit         = { GMAIL_APP_PASSWORD = { secret_id = "wrong-audit-smtp", version = "1" } }
       notifications = { GMAIL_APP_PASSWORD = { secret_id = "smtp", version = "1" }, NOTIFICATION_PAYLOAD_KEYS = { secret_id = "payload", version = "1" } }
-      legacy = { NOTIFICATION_PAYLOAD_KEYS = { secret_id = "payload", version = "1" }, SIGNUP_VERIFICATION_KEYS = { secret_id = "auth", version = "1" } }
-      worker = { NOTIFICATION_PAYLOAD_KEYS = { secret_id = "payload", version = "1" } }
+      legacy        = { NOTIFICATION_PAYLOAD_KEYS = { secret_id = "payload", version = "1" }, SIGNUP_VERIFICATION_KEYS = { secret_id = "auth", version = "1" } }
+      worker        = { NOTIFICATION_PAYLOAD_KEYS = { secret_id = "payload", version = "1" } }
     }
   }
   expect_failures = [terraform_data.identity_audit_safeguards]
@@ -181,7 +181,7 @@ run "audit_reconciliation_uses_twelve_hours" {
 run "identity_requires_accepted_m3_delivery" {
   command = plan
   variables {
-    enable_identity = true
+    enable_identity                   = true
     enable_event_driven_notifications = false
   }
   expect_failures = [terraform_data.identity_audit_safeguards]
@@ -194,11 +194,11 @@ run "worker_configuration_is_staged_without_moving_traffic" {
     values = { annotations = { "nordikdrive.io/runtime-rollout" = "{\"version\":1,\"verified\":true,\"state\":\"held\",\"token\":\"fixture-window\",\"target\":\"worker\",\"revision\":\"nordikdriveapi-worker-m4-fixture\"}" } }
   }
   variables {
-    runtime_serving_revisions = { worker = "nordikdriveapi-worker-accepted" }
+    runtime_serving_revisions   = { worker = "nordikdriveapi-worker-accepted" }
     runtime_candidate_revisions = { worker = "nordikdriveapi-worker-m4-fixture" }
   }
   assert {
-    condition = google_cloud_run_v2_service.backend["worker"].template[0].revision == "nordikdriveapi-worker-m4-fixture" && length([for route in google_cloud_run_v2_service.backend["worker"].traffic : route if route.revision == "nordikdriveapi-worker-accepted" && route.percent == 100]) == 1 && length([for route in google_cloud_run_v2_service.backend["worker"].traffic : route if route.revision == "nordikdriveapi-worker-m4-fixture" && route.percent == 0 && route.tag == "m4-candidate"]) == 1
+    condition     = google_cloud_run_v2_service.backend["worker"].template[0].revision == "nordikdriveapi-worker-m4-fixture" && length([for route in google_cloud_run_v2_service.backend["worker"].traffic : route if route.revision == "nordikdriveapi-worker-accepted" && route.percent == 100]) == 1 && length([for route in google_cloud_run_v2_service.backend["worker"].traffic : route if route.revision == "nordikdriveapi-worker-m4-fixture" && route.percent == 0 && route.tag == "m4-candidate"]) == 1
     error_message = "Configuration changes must preserve serving traffic while staging the exact candidate."
   }
 }
@@ -206,11 +206,11 @@ run "worker_configuration_is_staged_without_moving_traffic" {
 run "promoted_template_name_is_retained" {
   command = plan
   variables {
-    runtime_serving_revisions = { worker = "nordikdriveapi-worker-m4-fixture" }
+    runtime_serving_revisions  = { worker = "nordikdriveapi-worker-m4-fixture" }
     runtime_template_revisions = { worker = "nordikdriveapi-worker-m4-fixture" }
   }
   assert {
-    condition = google_cloud_run_v2_service.backend["worker"].template[0].revision == "nordikdriveapi-worker-m4-fixture" && length(google_cloud_run_v2_service.backend["worker"].traffic) == 1
+    condition     = google_cloud_run_v2_service.backend["worker"].template[0].revision == "nordikdriveapi-worker-m4-fixture" && length(google_cloud_run_v2_service.backend["worker"].traffic) == 1
     error_message = "Removing the candidate tag must retain the promoted template revision."
   }
 }

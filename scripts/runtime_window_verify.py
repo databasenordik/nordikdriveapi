@@ -4,7 +4,6 @@ This cannot stage images, change runtime configuration, or acquire a new window.
 It tests the recorded candidate or releases a promoted window after real drain.
 """
 import argparse
-import datetime as dt
 import json
 import os
 from pathlib import Path
@@ -37,21 +36,13 @@ def inspection(runtime,target,window):
                 raise r.Refused("Exact Worker inspection candidate is unavailable")
             address=candidates[0]["uri"]
     value=runtime.fetch(address+"/internal/v1/rollout/connections",os.environ.get("WORKER_INSPECTION_ID_TOKEN",""))
-    if value.get("version")!=2 or not isinstance(value.get("sessions"),list):
-        raise r.Refused("Versioned aggregate inspection is required before promotion")
-    try:observed=dt.datetime.fromisoformat(value["observed_at"].replace("Z","+00:00"))
-    except (ValueError,KeyError,TypeError):raise r.Refused("Timestamped inspection is required") from None
-    if not 0<=(dt.datetime.now(dt.timezone.utc)-observed).total_seconds()<=30:
-        raise r.Refused("Inspection evidence is stale")
-    for item in value["sessions"]:
-        if not isinstance(item,dict) or set(item)!={"application","state","owner","count"} or item.get("owner") not in {*r.SERVICES,"external"} or type(item.get("count")) is not int or item["count"]<0:
-            raise r.Refused("Inspection must contain aggregate counts only")
+    d.validate_inspection(value)
 
 
 def verify(runtime,target,token,operation,*,timeout=1200):
     _,window=prepare(runtime,target,token,operation)
     if operation=="test":
-        inspection(runtime,target,window)
+        if target!="worker":inspection(runtime,target,window)
         runtime.test(token)
     else:
         deadline=time.monotonic()+timeout

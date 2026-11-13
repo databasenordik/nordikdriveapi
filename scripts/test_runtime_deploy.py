@@ -52,7 +52,7 @@ class RuntimeTests(unittest.TestCase):
     def fetch(self,url,token,raw=False):
         self.fetches.append((url,token))
         if raw:return b"healthy"
-        if "/rollout/connections" in url:return {"version":2,"sessions":[{"application":"run:another","state":"active","count":5}],"observed_at":self.now.isoformat()}
+        if "/rollout/connections" in url:return {"version":2,"sessions":[{"application":"run:another","state":"active","owner":"external","count":5}],"observed_at":self.now.isoformat()}
         return metrics("nordikdriveapi-worker-old",self.now)
     def staged(self):return self.runtime.stage("worker",IMAGE,"github/run/123")
     def test_stage_preserves_serving_revision_and_unrelated_configuration(self):

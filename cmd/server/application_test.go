@@ -40,14 +40,16 @@ func TestRealApplicationRetainsRouteInventory(t *testing.T) {
 			t.Errorf("existing functionality lost route %s", key)
 		}
 	}
-	if len(actual) != len(expected)+2 {
-		t.Fatalf("unexpected route drift: %d routes; expected public inventory plus health and legacy honour trigger", len(actual))
+	if len(actual) != len(expected)+3 {
+		t.Fatalf("unexpected route drift: %d routes; expected public inventory plus health aliases and legacy honour trigger", len(actual))
 	}
-	request := httptest.NewRequest("GET", "/healthz", nil)
-	response := httptest.NewRecorder()
-	app.Router.ServeHTTP(response, request)
-	if response.Code != 200 || response.Header().Get("X-Request-ID") == "" {
-		t.Fatal("health/correlation unavailable")
+	for _, path := range []string{"/healthz", "/health"} {
+		request := httptest.NewRequest("GET", path, nil)
+		response := httptest.NewRecorder()
+		app.Router.ServeHTTP(response, request)
+		if response.Code != 200 || response.Header().Get("X-Request-ID") == "" {
+			t.Fatal("health/correlation unavailable", path)
+		}
 	}
 }
 

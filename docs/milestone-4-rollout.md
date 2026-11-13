@@ -26,6 +26,10 @@ CI also verifies race behavior and reproducible protobuf generation, and enforce
 
 Merge only after required CI and the repository's approving review. The release workflow publishes separate images for affected services. Before the persistent marker exists, it deliberately publishes without creating runtime revisions. A service folder selects that service; shared Go dependencies select their consumers; documentation and test-only edits select none.
 
+Keep the published artifact index and select its SHA256-verified Linux amd64 child as the runtime reference. Cloud Run reports the child digest on its revision. Job summaries record both references; provenance attestations remain published. A previous index reference can be resolved only by verifying its immutable contents and unique platform descriptor, never by substituting an unrelated digest.
+
+Use `/health` for authenticated probes through the Cloud Run frontend; retain `/healthz` for existing container startup probes. Worker readiness uses its authenticated, timestamped aggregate database inspection instead. A failed or stale inspection must leave the window held.
+
 ## 2. Establish coordination without reducing the budget early
 
 Install `migrations/005_runtime_inspection.sql` as the existing database installation identity, passing the existing Worker IAM database username as the psql variable `worker_user`. This creates one fixed, aggregate-only `SECURITY DEFINER` function with a pinned `pg_catalog` search path. Only Worker receives `EXECUTE`; Worker does **not** receive `pg_read_all_stats`. The function refuses to run if its installation owner lacks statistics visibility. Verify that its counts include a connection from another role and that Worker cannot read that role's SQL text.

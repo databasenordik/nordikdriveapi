@@ -147,7 +147,7 @@ func TestEnvoyServiceRoutingAndStreaming(t *testing.T) {
 	client := &http.Client{Timeout: 10 * time.Second}
 	deadline := time.Now().Add(20 * time.Second)
 	for {
-		response, err := client.Get(base + "/healthz")
+		response, err := client.Get(base + "/health")
 		if err == nil {
 			response.Body.Close()
 			if response.StatusCode == 200 {

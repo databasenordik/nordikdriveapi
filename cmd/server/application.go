@@ -56,7 +56,9 @@ func newApplication(cfg config.Config, dependencies *runtimeDependencies) (*appl
 	}()
 	r := gin.New()
 	r.Use(observability.Middleware())
-	r.GET("/healthz", func(c *gin.Context) { c.Status(200) })
+	health := func(c *gin.Context) { c.Status(200) }
+	r.GET("/healthz", health)
+	r.GET("/health", health)
 	observability.RegisterControls(r, dependencies.Pool)
 
 	r.Use(cors.New(cors.Config{

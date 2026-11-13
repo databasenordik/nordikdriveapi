@@ -119,7 +119,9 @@ func New(db *gorm.DB, pool *sql.DB, cfg config.Config, options Options, writer *
 		c.Next()
 		outbox.PublishPending(ctx, db, writer.Publisher, pending)
 	})
-	router.GET("/healthz", func(c *gin.Context) { c.Status(200) })
+	health := func(c *gin.Context) { c.Status(200) }
+	router.GET("/healthz", health)
+	router.GET("/health", health)
 	if err := auditoutbox.RegisterOwner(router, db, auditWriter, options.Audience); err != nil {
 		grpcServer.Stop()
 		return nil, nil, err

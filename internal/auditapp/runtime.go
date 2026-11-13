@@ -52,7 +52,9 @@ func router(db *gorm.DB, pool *sql.DB, directory identityclient.Directory, servi
 	r := gin.New()
 	r.Use(observability.Middleware())
 	r.Use(cors.New(cors.Config{AllowOrigins: config.AllowedOrigins(), AllowMethods: []string{"POST", "OPTIONS"}, AllowHeaders: []string{"Origin", "Content-Type", "Authorization"}, AllowCredentials: true, ExposeHeaders: []string{"X-Request-ID", "Retry-After"}}))
-	r.GET("/healthz", func(c *gin.Context) { c.Status(200) })
+	health := func(c *gin.Context) { c.Status(200) }
+	r.GET("/healthz", health)
+	r.GET("/health", health)
 	logs.RegisterRoutes(r, &logs.LogService{DB: db, Directory: directory})
 	r.POST("/internal/v1/audit/ingest", gin.WrapH(ingestHandler(service, authorize)))
 	observability.RegisterControls(r, pool)

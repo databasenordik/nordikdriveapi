@@ -10,7 +10,10 @@ import (
 // are embedded; the selected backend's token is supplied by ext_authz.
 func Bootstrap(backends map[string]Backend) ([]byte, error) {
 	clusters := []any{map[string]any{"name": "authorization", "type": "STATIC", "connect_timeout": "5s", "typed_extension_protocol_options": map[string]any{"envoy.extensions.upstreams.http.v3.HttpProtocolOptions": map[string]any{"@type": "type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions", "explicit_http_config": map[string]any{"http2_protocol_options": map[string]any{}}}}, "load_assignment": assignment("authorization", "127.0.0.1", 9001)}}
-	routes := []any{map[string]any{"match": map[string]any{"path": "/healthz"}, "direct_response": map[string]any{"status": 200, "body": map[string]any{"inline_string": "ok"}}, "typed_per_filter_config": disabledAuth()}}
+	routes := []any{}
+	for _, path := range []string{"/healthz", "/health"} {
+		routes = append(routes, map[string]any{"match": map[string]any{"path": path}, "direct_response": map[string]any{"status": 200, "body": map[string]any{"inline_string": "ok"}}, "typed_per_filter_config": disabledAuth()})
+	}
 	for _, name := range ServiceNames {
 		u, err := url.Parse(backends[name].URL)
 		if err != nil {

@@ -97,7 +97,7 @@ func run() error {
 	server := grpc.NewServer(grpc.MaxConcurrentStreams(128), grpc.StatsHandler(otelgrpc.NewServerHandler()))
 	authv3.RegisterAuthorizationServer(server, gateway.NewAuthorizer(cfg, gateway.PostgresLimiter{Pool: pool, AcquireBudget: time.Duration(cfg.AcquireMillis) * time.Millisecond, QueryBudget: time.Duration(cfg.QueryMillis) * time.Millisecond}, tokens))
 	health := &http.Server{Addr: "0.0.0.0:9002", ReadHeaderTimeout: 5 * time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/healthz" {
+		if r.URL.Path != "/healthz" && r.URL.Path != "/health" {
 			http.NotFound(w, r)
 			return
 		}

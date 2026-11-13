@@ -50,8 +50,11 @@ jobs:
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
         run: |
-          echo "image=$IMAGE@$DIGEST" >> "$GITHUB_OUTPUT"
-          echo "$IMAGE@$DIGEST" >> "$GITHUB_STEP_SUMMARY"
+          docker buildx imagetools inspect --raw "$IMAGE@$DIGEST" > "$RUNNER_TEMP/runtime-image-manifest.json"
+          RUNTIME_IMAGE=$(python3 scripts/runtime_image_reference.py --image "$IMAGE" --digest "$DIGEST" --manifest "$RUNNER_TEMP/runtime-image-manifest.json")
+          echo "image=$RUNTIME_IMAGE" >> "$GITHUB_OUTPUT"
+          echo "Published artifact: $IMAGE@$DIGEST" >> "$GITHUB_STEP_SUMMARY"
+          echo "Linux amd64 runtime: $RUNTIME_IMAGE" >> "$GITHUB_STEP_SUMMARY"
   stage:
     needs: build
     uses: ./.github/workflows/deploy-runtime.yml

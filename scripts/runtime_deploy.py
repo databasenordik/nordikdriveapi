@@ -92,6 +92,18 @@ def name(target):
     return f"projects/{r.PROJECT}/locations/{r.REGION}/services/{r.SERVICES[target]}"
 
 
+def validate_inspection(value):
+    if value.get("version")!=2 or not isinstance(value.get("sessions"),list):
+        raise r.Refused("Versioned aggregate inspection is required before promotion")
+    try:observed=dt.datetime.fromisoformat(value["observed_at"].replace("Z","+00:00"))
+    except (ValueError,KeyError,TypeError,AttributeError):raise r.Refused("Timestamped inspection is required") from None
+    if observed.tzinfo is None or not 0<=(dt.datetime.now(dt.timezone.utc)-observed).total_seconds()<=30:
+        raise r.Refused("Inspection evidence is stale")
+    for item in value["sessions"]:
+        if not isinstance(item,dict) or set(item)!={"application","state","owner","count"} or item.get("owner") not in {*r.SERVICES,"external"} or type(item.get("count")) is not int or item["count"]<0:
+            raise r.Refused("Inspection must contain aggregate counts only")
+
+
 def serving_revision(service):
     traffic=[item for item in service.get("trafficStatuses",[]) if item.get("percent",0)>0]
     if len(traffic)!=1 or traffic[0].get("percent")!=100 or not traffic[0].get("revision"):
@@ -278,7 +290,12 @@ class Runtime:
             if len(candidates)!=1 or candidates[0].get("percent",0)!=0 or not candidates[0].get("uri"):
                 raise r.Refused("Exact zero-traffic candidate URL is unavailable")
             address=candidates[0]["uri"]
-        self.fetch(address+"/healthz",os.environ.get("RUNTIME_ID_TOKEN",""),raw=True)
+        if window["target"]=="worker":
+            # The signed fixed database query proves readiness more strongly
+            # than a health response, including on the first foundation image.
+            validate_inspection(self.fetch(address+"/internal/v1/rollout/connections",os.environ.get("WORKER_INSPECTION_ID_TOKEN","")))
+        else:
+            self.fetch(address+"/health",os.environ.get("RUNTIME_ID_TOKEN",""),raw=True)
         actual=self.api.get(name(window["target"])+"/revisions/"+window["revision"])
         if image_container(actual,window["target"]).get("image")!=window["image"]:
             raise r.Refused("Tested revision digest does not match its release")

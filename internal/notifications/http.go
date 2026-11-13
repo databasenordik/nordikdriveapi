@@ -29,7 +29,9 @@ func WorkloadAuthorizer(audience string, grants map[string]map[string]bool) Auth
 }
 func Handler(service *Service, authorize Authorizer) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) })
+	health := func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) }
+	mux.HandleFunc("GET /healthz", health)
+	mux.HandleFunc("GET /health", health)
 	guard := func(role string, next http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")

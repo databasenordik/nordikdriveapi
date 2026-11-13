@@ -7,7 +7,7 @@ from pathlib import Path, PurePosixPath
 import subprocess
 
 SHARED_BUILD_FILES = {"go.mod", "go.sum", ".dockerignore", ".github/services.json",
-    "scripts/changed_services.py", ".github/workflows/cd-go.yml",
+    "scripts/changed_services.py", "scripts/runtime_image_reference.py", ".github/workflows/cd-go.yml",
     ".github/workflows/service-release.yml", ".github/workflows/deploy-runtime.yml"}
 
 def json_stream(raw):

@@ -143,7 +143,9 @@ func Router(ctx context.Context, cfg config.Config, db *gorm.DB, pool *sql.DB, v
 	}
 	router := gin.New()
 	router.Use(observability.Middleware())
-	router.GET("/healthz", func(c *gin.Context) { c.Status(200) })
+	health := func(c *gin.Context) { c.Status(200) }
+	router.GET("/healthz", health)
+	router.GET("/health", health)
 	if deployer := os.Getenv("ROLLOUT_DEPLOYER_ACCOUNT"); deployer != "" {
 		handler, err := NewInspectionHandler(pool, os.Getenv("WORKER_INSPECTION_AUDIENCE"), deployer)
 		if err != nil {

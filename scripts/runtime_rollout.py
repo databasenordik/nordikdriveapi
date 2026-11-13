@@ -66,6 +66,10 @@ class API:
     def patch(self, current, fields, mask):
         if not current.get("etag"):
             raise Refused("Conditional update requires a resource etag")
+        # Cloud Run applies the field mask to the supplied etag as well. Omitting
+        # it can leave a metadata write without the intended precondition.
+        if "etag" not in mask.split(","):
+            mask += ",etag"
         operation = self.request("PATCH", current["name"] + "?updateMask=" + urllib.parse.quote(mask),
                                  {"name": current["name"], "etag": current["etag"], **fields})
         deadline = time.monotonic() + 180
@@ -114,25 +118,30 @@ class Coordinator:
             raise Refused("Persistent marker was not retained")
         return updated
 
-    def bootstrap(self):
+    def bootstrap(self, *, resume_token=None, recovery_reason=None):
         before = self.api.get(GATEWAY)
         previous = marker(before)
         if previous is not None:
-            raise Refused("Marker already exists; inspect/recover the existing state")
-        value = {"version": 1, "state": "bootstrap", "token": uuid.uuid4().hex, "verified": False}
+            if previous.get("state")!="bootstrap" or previous.get("verified") or not resume_token or resume_token!=previous.get("token") or not recovery_reason:
+                raise Refused("Marker already exists; explicit blocked-bootstrap recovery required")
+        elif resume_token or recovery_reason:
+            raise Refused("There is no blocked bootstrap to recover")
+        value = {"version": 1, "state": "bootstrap", "token": previous["token"] if previous else uuid.uuid4().hex, "verified": False,"proof_nonce":uuid.uuid4().hex}
         updated = self._write(before, value)
-        # A deliberately stale write contains metadata only. If it is accepted,
-        # conditional locking is unproven and the marker stays blocked.
+        # The stale request must conflict, rather than repeat the same body:
+        # Cloud Run may accept an identical no-op even with an older etag.
+        conflicting={**updated["annotations"],MARKER:json.dumps({**value,"proof_nonce":uuid.uuid4().hex},separators=(",", ":"),sort_keys=True)}
         try:
-            self.api.patch(before, {"annotations": updated["annotations"]}, "annotations")
+            self.api.patch(before, {"annotations": conflicting}, "annotations")
         except Refused as error:
             if "Concurrent modification" not in str(error):
                 raise
         else:
             raise Refused("Stale etag accepted; marker is blocked in bootstrap")
         untouched(before, self.api.get(GATEWAY))
-        return self._write(updated, {"version": 1, "state": "idle", "verified": True,
-                                    "verified_at": self.now().isoformat()})
+        verified={"version":1,"state":"idle","verified":True,"verified_at":self.now().isoformat(),"conditional_update":"etag-in-mask-conflicting-write"}
+        if recovery_reason:verified["bootstrap_recovery_reason"]=recovery_reason
+        return self._write(updated, verified)
 
     def acquire(self, target, image, owner):
         if target not in SERVICES or not isinstance(image,str) or not re.fullmatch(r"us-west1-docker\.pkg\.dev/planar-ray-472112-e8/nordikdriveapi/[A-Za-z0-9_-]+@sha256:[a-f0-9]{64}", image):

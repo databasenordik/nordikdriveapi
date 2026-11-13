@@ -390,7 +390,7 @@ def main():
         if args.target:
             current=runtime.api.get(name(args.target));value.update(audience=current["uri"],service=name(args.target))
     elif args.command=="bootstrap":
-        current=runtime.coordinator.bootstrap();value={"state":r.marker(current)["state"]}
+        current=runtime.coordinator.bootstrap(resume_token=args.token,recovery_reason=args.reason);value={"state":r.marker(current)["state"]}
     elif args.command in {"prepare","prepare-new"}:
         value=runtime.prepare(args.target,args.image,args.owner,new_service=args.command=="prepare-new")
     elif args.command=="record-stage":

@@ -1,0 +1,85 @@
+name: Verify an existing development rollout window
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        type: choice
+        options: [test, drain]
+        required: true
+      target:
+        type: choice
+        options: [legacy, worker, gateway, notifications, identity, audit]
+        required: true
+      window_token:
+        description: Identifier of the already held rollout window
+        type: string
+        required: true
+permissions:
+  contents: read
+  id-token: write
+concurrency:
+  group: nordik-development-runtime
+  queue: max
+  cancel-in-progress: false
+jobs:
+  verify:
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: development
+    env:
+      TARGET: ${{ inputs.target }}
+      OPERATION: ${{ inputs.operation }}
+      WINDOW_TOKEN: ${{ inputs.window_token }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: auth
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: projects/724838782318/locations/global/workloadIdentityPools/github-pool-api/providers/github-provider-api
+          service_account: github-nordik-drive-deployer@planar-ray-472112-e8.iam.gserviceaccount.com
+          token_format: access_token
+          create_credentials_file: false
+      - id: window
+        name: Validate existing window before requesting caller tokens
+        env:
+          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        run: |
+          python3 - <<'PY'
+          import os,sys
+          sys.path.insert(0,'scripts')
+          import runtime_deploy as d
+          import runtime_window_verify as w
+          audience,_=w.prepare(d.Runtime(),os.environ['TARGET'],os.environ['WINDOW_TOKEN'],os.environ['OPERATION'])
+          with open(os.environ['GITHUB_OUTPUT'],'a',encoding='utf-8') as output:output.write('audience='+audience+'\n')
+          PY
+      - id: runtime_token
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: projects/724838782318/locations/global/workloadIdentityPools/github-pool-api/providers/github-provider-api
+          service_account: github-nordik-drive-deployer@planar-ray-472112-e8.iam.gserviceaccount.com
+          token_format: id_token
+          id_token_audience: ${{ steps.window.outputs.audience }}
+          id_token_include_email: true
+          create_credentials_file: false
+      - id: inspection_token
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: projects/724838782318/locations/global/workloadIdentityPools/github-pool-api/providers/github-provider-api
+          service_account: github-nordik-drive-deployer@planar-ray-472112-e8.iam.gserviceaccount.com
+          token_format: id_token
+          id_token_audience: https://nordikdriveapi-worker-724838782318.us-west1.run.app
+          id_token_include_email: true
+          create_credentials_file: false
+      - name: Verify exact candidate or complete drain
+        env:
+          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+          RUNTIME_ID_TOKEN: ${{ steps.runtime_token.outputs.id_token }}
+          WORKER_INSPECTION_ID_TOKEN: ${{ steps.inspection_token.outputs.id_token }}
+        run: python3 scripts/runtime_window_verify.py --target "$TARGET" --token "$WINDOW_TOKEN" --operation "$OPERATION" --output "$RUNNER_TEMP/window-verification.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: window-verification-${{ inputs.target }}-${{ inputs.operation }}
+          path: ${{ runner.temp }}/window-verification.json
+          if-no-files-found: ignore

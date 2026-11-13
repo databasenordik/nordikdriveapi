@@ -2,6 +2,8 @@ import copy
 import datetime as dt
 import json
 import unittest
+import urllib.parse
+from unittest.mock import patch
 
 import runtime_rollout as r
 
@@ -53,6 +55,31 @@ class RolloutTests(unittest.TestCase):
         self.assertEqual(r.marker(after)['state'],'idle')
         self.assertTrue(r.marker(after)['verified'])
         with self.assertRaises(r.Refused):self.coordinator.bootstrap()
+    def test_identical_noop_acceptance_does_not_weaken_conflicting_write_proof(self):
+        class NoopAPI(FakeAPI):
+            def patch(self,current,fields,mask):
+                if fields.get('annotations')==self.data.get('annotations'):return self.get(r.GATEWAY)
+                return super().patch(current,fields,mask)
+        self.assertTrue(r.marker(r.Coordinator(NoopAPI()).bootstrap())['verified'])
+    def test_failed_bootstrap_recovery_requires_exact_token_and_reason(self):
+        self.api.ignore_etag=True
+        with self.assertRaises(r.Refused):self.coordinator.bootstrap()
+        token=r.marker(self.api.data)['token'];self.api.ignore_etag=False
+        for provided,reason in ((None,'recover'),('wrong','recover'),(token,None)):
+            with self.assertRaises(r.Refused):self.coordinator.bootstrap(resume_token=provided,recovery_reason=reason)
+        result=self.coordinator.bootstrap(resume_token=token,recovery_reason='verified corrected metadata precondition')
+        self.assertTrue(r.marker(result)['verified'])
+        with self.assertRaises(r.Refused):self.coordinator.bootstrap(resume_token=token,recovery_reason='cannot overwrite idle coordination')
+    def test_actual_http_request_includes_etag_in_update_mask(self):
+        api=r.API();current={'name':r.GATEWAY,'etag':'expected-version'}
+        for mask in ('annotations','annotations,etag'):
+            with patch.object(api,'request',return_value={'done':True}) as request,patch.object(api,'get',return_value=current):
+                api.patch(current,{'annotations':{'fixture':'value'}},mask)
+                method,path,body=request.call_args.args
+                self.assertEqual(method,'PATCH')
+                fields=urllib.parse.parse_qs(urllib.parse.urlsplit(path).query)['updateMask'][0].split(',')
+                self.assertEqual(fields.count('etag'),1)
+                self.assertEqual(body['etag'],'expected-version')
     def test_weak_etag_or_revision_side_effect_blocks_bootstrap(self):
         for attribute in ('ignore_etag','mutate_template'):
             with self.subTest(attribute=attribute):

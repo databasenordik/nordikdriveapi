@@ -333,6 +333,20 @@ func TestPostgresIdentityAuditRelocationPermissionsAndHistory(t *testing.T) {
 	if err := db.Exec("SELECT setval(pg_get_serial_sequence('public.logs','id'),5002,true)").Error; err != nil {
 		t.Fatal(err)
 	}
+	compatibilityDB := ownerRoleDB(t, db, roles["identity_user"], "identity,public")
+	if err := (&logs.LogService{DB: compatibilityDB}).Log(logs.SystemLog{
+		Level: "INFO", Service: "auth", UserID: &uid, Action: "LOGIN",
+		Message: "Identity compatibility activity", Communities: pq.StringArray{"North"},
+	}, map[string]any{"phase": "identity_compatibility"}); err != nil {
+		t.Fatal("Identity cannot preserve activity writes before Audit extraction", err)
+	}
+	var generatedLogID uint
+	if err := db.Raw("SELECT id FROM public.logs WHERE message = ?", "Identity compatibility activity").Scan(&generatedLogID).Error; err != nil || generatedLogID <= 5002 {
+		t.Fatal("compatibility activity did not receive its existing sequence ID", generatedLogID, err)
+	}
+	if err := compatibilityDB.Exec("SELECT message FROM public.logs").Error; err == nil {
+		t.Fatal("Identity compatibility writer can read activity content")
+	}
 	type history struct {
 		rows  []logs.LogRow
 		aggs  logs.LogAggregates
@@ -466,6 +480,10 @@ func TestPostgresIdentityAuditRelocationPermissionsAndHistory(t *testing.T) {
 	gate["compatible_rollback_verified"] = "true"
 	if err := applyOwnerMigration(db, "008_identity_audit_revoke_transitional.sql", gate); err != nil {
 		t.Fatal(err)
+	}
+	var retainedLogIDRead bool
+	if err := db.Raw("SELECT has_column_privilege(?, 'audit.logs', 'id', 'SELECT')", roles["identity_user"]).Scan(&retainedLogIDRead).Error; err != nil || retainedLogIDRead {
+		t.Fatal("transitional log ID column grant survived final ownership revocation", err)
 	}
 	for _, test := range []struct {
 		db      *gorm.DB

@@ -491,7 +491,7 @@ func (cs *ChatService) generateWithModelFallback(
 	contents []*genai.Content,
 	config *genai.GenerateContentConfig,
 ) (*genai.GenerateContentResponse, string, error) {
-	resp, err := genaiGenerateContentHook(cs.Client, ctx, primary, contents, config)
+	resp, err := cs.measuredGenerate(ctx, primary, contents, config)
 	if err == nil {
 		return resp, primary, nil
 	}
@@ -499,7 +499,7 @@ func (cs *ChatService) generateWithModelFallback(
 		return nil, primary, err
 	}
 
-	resp2, err2 := genaiGenerateContentHook(cs.Client, ctx, fallback, contents, config)
+	resp2, err2 := cs.measuredGenerate(ctx, fallback, contents, config)
 	if err2 == nil {
 		return resp2, fallback, nil
 	}

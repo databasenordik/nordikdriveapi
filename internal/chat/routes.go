@@ -14,6 +14,7 @@ func RegisterRoutes(r *gin.Engine, chatService *ChatService, backends ...ChatBac
 	{
 		userGroup.POST("", chatController.Chat)
 		userGroup.GET("/history", chatController.History)
+		userGroup.GET("/comparison", chatController.Comparison)
 		userGroup.POST("/tts", chatController.TTS)
 		userGroup.GET("/describe/:id", chatController.Describe)
 	}

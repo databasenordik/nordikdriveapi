@@ -116,6 +116,64 @@ run "identity_reuses_single_finite_signup_cleanup_job" {
     error_message = "Transfer the one existing finite cleanup job to Identity; do not add a cleanup API/job."
   }
 }
+run "keyless_legacy_retains_startup_access_until_revision_drain" {
+  command = plan
+  variables {
+    enable_identity           = true
+    enable_identity_consumers = true
+    identity_public_enabled   = true
+    identity_outbox_exclusive = true
+  }
+  assert {
+    condition     = !contains(keys(local.secrets.legacy), "SIGNUP_VERIFICATION_KEYS") && local.secret_pairs["legacy:SIGNUP_VERIFICATION_KEYS"].secret_id == "fixture-auth-keys" && contains(keys(google_secret_manager_secret_iam_member.runtime), "legacy:SIGNUP_VERIFICATION_KEYS")
+    error_message = "Remove the Legacy environment reference while preserving startup access for serving/rollback revisions until they drain."
+  }
+}
+run "retired_legacy_access_keeps_identity_secret_and_version" {
+  command = plan
+  variables {
+    enable_identity                           = true
+    enable_identity_consumers                 = true
+    identity_public_enabled                   = true
+    identity_outbox_exclusive                 = true
+    legacy_signup_key_access_retired_verified = true
+  }
+  assert {
+    condition     = !contains(keys(local.secret_pairs), "legacy:SIGNUP_VERIFICATION_KEYS") && local.secret_pairs["identity:SIGNUP_VERIFICATION_KEYS"].secret_id == "fixture-auth-keys" && local.secret_pairs["identity:SIGNUP_VERIFICATION_KEYS"].version == "1" && contains(keys(google_secret_manager_secret.runtime), "fixture-auth-keys") && local.secrets.legacy.JWT_SECRET == var.jwt_secret
+    error_message = "Revoke only Legacy's former accessor membership; preserve Identity access, secret metadata, versions and JWT."
+  }
+}
+run "signup_key_retirement_requires_completed_owner_cutover" {
+  command = plan
+  variables {
+    enable_identity                           = true
+    legacy_signup_key_access_retired_verified = true
+  }
+  expect_failures = [terraform_data.identity_audit_safeguards]
+}
+run "legacy_reference_cannot_disappear_before_verified_access_retirement" {
+  command = plan
+  variables {
+    enable_identity           = true
+    enable_identity_consumers = true
+    identity_public_enabled   = true
+    identity_outbox_exclusive = true
+    runtime_secrets = {
+      identity = {
+        NOTIFICATION_PAYLOAD_KEYS = { secret_id = "fixture-payload-keys", version = "1" }
+        SIGNUP_VERIFICATION_KEYS  = { secret_id = "fixture-auth-keys", version = "1" }
+      }
+      notifications = {
+        GMAIL_USER                = { secret_id = "fixture-smtp-user", version = "1" }
+        GMAIL_APP_PASSWORD        = { secret_id = "fixture-smtp-password", version = "1" }
+        NOTIFICATION_PAYLOAD_KEYS = { secret_id = "fixture-payload-keys", version = "1" }
+      }
+      legacy = { NOTIFICATION_PAYLOAD_KEYS = { secret_id = "fixture-payload-keys", version = "1" } }
+      worker = { NOTIFICATION_PAYLOAD_KEYS = { secret_id = "fixture-payload-keys", version = "1" } }
+    }
+  }
+  expect_failures = [terraform_data.identity_audit_safeguards]
+}
 run "independent_overlap_is_rejected_before_identity" {
   command = plan
   variables {

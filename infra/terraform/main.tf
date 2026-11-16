@@ -32,8 +32,15 @@ locals {
     })
     worker = lookup(var.runtime_secrets, "worker", {})
   }, var.enable_notifications ? { notifications = lookup(var.runtime_secrets, "notifications", {}) } : {}, var.enable_identity ? { identity = merge(lookup(var.runtime_secrets, "identity", {}), { JWT_SECRET = var.jwt_secret }) } : {}, var.enable_audit ? { audit = { JWT_SECRET = var.jwt_secret } } : {})
+  # Removing a revision's environment reference precedes IAM revocation. Keep
+  # access while a serving/rollback revision can still fetch this startup secret.
+  secret_access = merge(local.secrets, {
+    legacy = merge(local.secrets.legacy, var.legacy_signup_key_access_retired_verified ? {} : {
+      for key, value in lookup(var.runtime_secrets, "legacy", {}) : key => value if key == "SIGNUP_VERIFICATION_KEYS"
+    })
+  })
   secret_pairs = {
-    for item in flatten([for owner, secrets in local.secrets : [for env, secret in secrets : merge(secret, {
+    for item in flatten([for owner, secrets in local.secret_access : [for env, secret in secrets : merge(secret, {
       owner = owner, env = env
     })]]) : "${item.owner}:${item.env}" => item
   }

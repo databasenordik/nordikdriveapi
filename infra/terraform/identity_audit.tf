@@ -46,6 +46,11 @@ variable "identity_outbox_exclusive" {
   type    = bool
   default = false
 }
+variable "legacy_signup_key_access_retired_verified" {
+  type        = bool
+  default     = false
+  description = "True only after serving and compatible rollback Legacy revisions omit SIGNUP_VERIFICATION_KEYS and revisions referencing it have drained. Revokes the former Legacy grant without deleting or rotating the secret."
+}
 variable "identity_signup_cleanup" {
   type    = bool
   default = false
@@ -166,6 +171,14 @@ resource "terraform_data" "identity_audit_safeguards" {
     precondition {
       condition     = !var.identity_outbox_exclusive || (var.enable_identity && var.identity_public_enabled)
       error_message = "Identity-only producer grants require the controlled auth/outbox cutover."
+    }
+    precondition {
+      condition     = !var.legacy_signup_key_access_retired_verified || (var.enable_identity && var.enable_identity_consumers && var.identity_public_enabled && var.identity_outbox_exclusive)
+      error_message = "Retire Legacy signup-key access only after Identity public/auth and exclusive-producer cutover."
+    }
+    precondition {
+      condition     = !var.identity_outbox_exclusive || var.legacy_signup_key_access_retired_verified || contains(keys(lookup(var.runtime_secrets, "legacy", {})), "SIGNUP_VERIFICATION_KEYS")
+      error_message = "Preserve the Legacy signup-key reference in runtime_secrets until old key-referencing revisions and compatible rollback have been verified."
     }
     precondition {
       condition     = !var.identity_signup_cleanup || (var.enable_identity && var.enable_signup_cleanup)

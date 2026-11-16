@@ -34,6 +34,17 @@ func TestRealApplicationRetainsRouteInventory(t *testing.T) {
 	for _, route := range app.Router.Routes() {
 		actual[route.Method+" "+route.Path] = true
 	}
+	// Temporary comparison adds exactly this authenticated capability route.
+	const comparisonRoute = "GET /api/chat/comparison"
+	if !actual[comparisonRoute] {
+		t.Fatal("comparison capability route missing")
+	}
+	delete(actual, comparisonRoute)
+	capabilityResponse := httptest.NewRecorder()
+	app.Router.ServeHTTP(capabilityResponse, httptest.NewRequest("GET", "/api/chat/comparison", nil))
+	if capabilityResponse.Code != 401 {
+		t.Fatal("comparison capability must require authentication")
+	}
 	for _, route := range expected {
 		key := route.Method + " " + route.Path
 		if !actual[key] {

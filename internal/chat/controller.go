@@ -49,7 +49,35 @@ func (cc *ChatController) Chat(c *gin.Context) {
 		}
 		ctx = context.WithValue(ctx, chatUserContextKey{}, userID)
 	}
-	result, err := cc.Backend.Chat(ctx, question, audioFile, filename, communities, conversationID)
+	engine := strings.TrimSpace(c.PostForm("engine"))
+	backend, allowed := cc.comparisonBackend(c, engine)
+	if !allowed {
+		return
+	}
+	var capture *LLMTiming
+	if comparisonEnabled() {
+		capture = &LLMTiming{}
+		ctx = context.WithValue(ctx, llmTimingKey{}, capture)
+	}
+	result, err := backend.Chat(ctx, question, audioFile, filename, communities, conversationID)
+	if capture != nil {
+		selected := engine
+		if selected == "" {
+			selected = "api"
+			if _, ok := backend.(*niaChatBackend); ok {
+				selected = "nia"
+			}
+		}
+		answer := ""
+		if result != nil {
+			answer = result.Answer
+			if result.Question != "" {
+				question = result.Question
+			}
+		}
+		engine = selected
+		logComparison(ctx, selected, question, answer, capture.summary(), err != nil)
+	}
 	if err != nil {
 		statusCode := http.StatusInternalServerError
 		var upstream *ChatHTTPError
@@ -64,6 +92,10 @@ func (cc *ChatController) Chat(c *gin.Context) {
 	}
 
 	response := gin.H{"answer": result.Answer}
+	if capture != nil {
+		response["timing"] = capture.summary()
+		response["engine"] = engine
+	}
 	if result.ConversationID != "" {
 		response["conversation_id"] = result.ConversationID
 	}

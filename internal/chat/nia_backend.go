@@ -20,7 +20,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"nordik-drive-api/internal/observability"
 
 	"nordik-drive-api/internal/circuit"
 	niapb "nordik-drive-api/internal/nia/pb"
@@ -127,7 +129,7 @@ func (b *niaChatBackend) Chat(ctx context.Context, question string, audio *multi
 		if err != nil || len(data) == 0 || len(data) > maxAudio {
 			return nil, &ChatHTTPError{Status: http.StatusBadRequest, Message: "audio must be between 1 byte and 20 MiB"}
 		}
-		transcript, _, err := b.service.generateFromPrompt(ctx,
+		transcript, _, err := b.service.generateFromPrompt(context.WithValue(ctx, llmTimingKey{}, (*LLMTiming)(nil)),
 			"Transcribe the spoken question. Return only the transcription, without answering it or adding commentary.", data, audio.Header.Get("Content-Type"))
 		if err != nil {
 			return nil, &ChatHTTPError{Status: http.StatusBadGateway, Message: "audio transcription failed"}
@@ -142,9 +144,28 @@ func (b *niaChatBackend) Chat(ctx context.Context, question string, audio *multi
 	if retry > 0 {
 		return nil, breakerError(retry)
 	}
+	ctx = metadata.AppendToOutgoingContext(ctx, "x-request-id", observability.RequestID(ctx))
+	if capture, ok := ctx.Value(llmTimingKey{}).(*LLMTiming); ok && capture != nil {
+		capture.Unavailable = true
+	}
 	reply, err := b.client.Query(ctx, &niapb.QueryRequest{
 		Question: question, SelectedFileId: int64(file.ID), Communities: communities, ConversationId: conversationID, UserId: userID,
 	})
+	if err == nil && reply != nil {
+		if capture, ok := ctx.Value(llmTimingKey{}).(*LLMTiming); ok && capture != nil {
+			var result struct {
+				Timing *struct {
+					Calls []ProviderCall `json:"provider_calls"`
+				} `json:"timing"`
+			}
+			if json.Unmarshal(reply.GetResultJson(), &result) == nil && result.Timing != nil {
+				capture.Unavailable = false
+				for _, call := range result.Timing.Calls {
+					capture.add(call)
+				}
+			}
+		}
+	}
 	b.record(ticket, ctx, niaAvailabilityFailure(ctx, err) || reply.GetStatus() == "planner_unavailable" || reply.GetStatus() == "planner_failed")
 	if err != nil {
 		return nil, mapNIAError(err)

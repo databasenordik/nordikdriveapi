@@ -54,30 +54,27 @@ func (cc *ChatController) Chat(c *gin.Context) {
 	if !allowed {
 		return
 	}
-	var capture *LLMTiming
-	if comparisonEnabled() {
-		capture = &LLMTiming{}
-		ctx = context.WithValue(ctx, llmTimingKey{}, capture)
-	}
+	// Provider timing and question/answer logs are permanent. Only explicit
+	// engine overrides and their public response fields use the temporary gate.
+	capture := &LLMTiming{}
+	ctx = context.WithValue(ctx, llmTimingKey{}, capture)
 	result, err := backend.Chat(ctx, question, audioFile, filename, communities, conversationID)
-	if capture != nil {
-		selected := engine
-		if selected == "" {
-			selected = "api"
-			if _, ok := backend.(*niaChatBackend); ok {
-				selected = "nia"
-			}
+	selected := engine
+	if selected == "" {
+		selected = "api"
+		if _, ok := backend.(*niaChatBackend); ok {
+			selected = "nia"
 		}
-		answer := ""
-		if result != nil {
-			answer = result.Answer
-			if result.Question != "" {
-				question = result.Question
-			}
-		}
-		engine = selected
-		logComparison(ctx, selected, question, answer, capture.summary(), err != nil)
 	}
+	answer := ""
+	if result != nil {
+		answer = result.Answer
+		if result.Question != "" {
+			question = result.Question
+		}
+	}
+	engine = selected
+	logComparison(ctx, selected, question, answer, capture.summary(), err != nil)
 	if err != nil {
 		statusCode := http.StatusInternalServerError
 		var upstream *ChatHTTPError
@@ -92,7 +89,7 @@ func (cc *ChatController) Chat(c *gin.Context) {
 	}
 
 	response := gin.H{"answer": result.Answer}
-	if capture != nil {
+	if comparisonEnabled() {
 		response["timing"] = capture.summary()
 		response["engine"] = engine
 	}

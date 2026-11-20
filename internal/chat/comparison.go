@@ -1,6 +1,7 @@
 package chat
 
-// Temporary development comparison. Remove after the November 17 comparison.
+// Permanent provider measurements and chat logs. Only engine selection is
+// restricted to the temporary development comparison window.
 import (
 	"context"
 	"log/slog"

@@ -22,7 +22,9 @@ The adapter resolves the filename to its database file ID and forwards the
 question and community selections using `proto/nia.proto`. It reuses one gRPC
 connection, propagates request cancellation, and reports NIA failures with HTTP
 errors. It does not switch back to Go automatically on failure. Audio questions
-are transcribed through the existing Gemini client before forwarding the text.
+are transcribed by NIA's `Transcribe` RPC before forwarding the text.
+`POST /api/chat/tts` returns the audio from NIA's `Speak` RPC, so it also needs
+`CHAT_USE_NIA=true`. NIA must be deployed with both RPCs before this API.
 
 NIA must be deployed with `NIA_TRANSPORT=grpc`, a configured
 `NIA_GRPC_PRINCIPAL_ID`, its database and reasoning settings, and migration

@@ -14,7 +14,6 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/gin-gonic/gin"
-	"google.golang.org/genai"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -161,11 +160,20 @@ func TestConfiguredChatBackend_FlagAndValidation(t *testing.T) {
 
 func TestNIABackend_TranscribesAudioBeforeQuery(t *testing.T) {
 	const transcript = "How many records are in this list?"
-	target := startTestNIA(t, func(ctx context.Context, req *niapb.QueryRequest) (*niapb.QueryResponse, error) {
+	query := func(ctx context.Context, req *niapb.QueryRequest) (*niapb.QueryResponse, error) {
 		if req.Question != transcript || req.SelectedFileId != 49 {
 			t.Errorf("unexpected transcribed query: %v", req)
 		}
 		return &niapb.QueryResponse{Status: "answered", Answer: "Audio answer"}, nil
+	}
+	target := startTestSpeech(t, &testSpeechServer{
+		testNIAServer: testNIAServer{query: query},
+		transcribe: func(_ context.Context, req *niapb.TranscribeRequest) (*niapb.TranscribeResponse, error) {
+			if string(req.Audio) != "spoken question" || req.MimeType != "audio/webm" || req.UserId != 7 {
+				t.Errorf("unexpected transcription request: %v", req)
+			}
+			return &niapb.TranscribeResponse{Text: transcript}, nil
+		},
 	})
 	db, mock, cleanup := newMockDBChatSvc(t)
 	t.Cleanup(cleanup)
@@ -174,27 +182,11 @@ func TestNIABackend_TranscribesAudioBeforeQuery(t *testing.T) {
 	t.Setenv("CHAT_USE_NIA", "true")
 	t.Setenv("NIA_GRPC_TARGET", target)
 	t.Setenv("NIA_GRPC_TLS", "false")
-	backend, closeBackend, err := NewConfiguredChatBackend(&ChatService{DB: db, Client: &genai.Client{}})
+	backend, closeBackend, err := NewConfiguredChatBackend(&ChatService{DB: db})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(closeBackend)
-	oldGenerate := genaiGenerateContentHook
-	t.Cleanup(func() { genaiGenerateContentHook = oldGenerate })
-	genaiGenerateContentHook = func(_ *genai.Client, _ context.Context, _ string, contents []*genai.Content, _ *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error) {
-		foundAudio := false
-		for _, content := range contents {
-			for _, part := range content.Parts {
-				if part.InlineData != nil && part.InlineData.MIMEType == "audio/webm" && string(part.InlineData.Data) == "spoken question" {
-					foundAudio = true
-				}
-			}
-		}
-		if !foundAudio {
-			t.Error("transcription did not receive audio")
-		}
-		return rawAnswer(transcript), nil
-	}
 	audio := makeAudioFileHeader(t, "audio/webm", []byte("spoken question"))
 	reply, err := backend.Chat(context.WithValue(context.Background(), chatUserContextKey{}, int64(7)), "", audio, "sheet.xlsx", nil, "")
 	if err != nil {

@@ -129,10 +129,9 @@ func (b *niaChatBackend) Chat(ctx context.Context, question string, audio *multi
 		if err != nil || len(data) == 0 || len(data) > maxAudio {
 			return nil, &ChatHTTPError{Status: http.StatusBadRequest, Message: "audio must be between 1 byte and 20 MiB"}
 		}
-		transcript, _, err := b.service.generateFromPrompt(context.WithValue(ctx, llmTimingKey{}, (*LLMTiming)(nil)),
-			"Transcribe the spoken question. Return only the transcription, without answering it or adding commentary.", data, audio.Header.Get("Content-Type"))
+		transcript, err := b.transcribe(ctx, userID, data, audio.Header.Get("Content-Type"))
 		if err != nil {
-			return nil, &ChatHTTPError{Status: http.StatusBadGateway, Message: "audio transcription failed"}
+			return nil, err
 		}
 		question = transcript
 	}

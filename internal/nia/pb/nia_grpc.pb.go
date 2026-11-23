@@ -19,9 +19,11 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Assistant_Query_FullMethodName   = "/nordik.nia.v1.Assistant/Query"
-	Assistant_Health_FullMethodName  = "/nordik.nia.v1.Assistant/Health"
-	Assistant_History_FullMethodName = "/nordik.nia.v1.Assistant/History"
+	Assistant_Query_FullMethodName      = "/nordik.nia.v1.Assistant/Query"
+	Assistant_Health_FullMethodName     = "/nordik.nia.v1.Assistant/Health"
+	Assistant_History_FullMethodName    = "/nordik.nia.v1.Assistant/History"
+	Assistant_Speak_FullMethodName      = "/nordik.nia.v1.Assistant/Speak"
+	Assistant_Transcribe_FullMethodName = "/nordik.nia.v1.Assistant/Transcribe"
 )
 
 // AssistantClient is the client API for Assistant service.
@@ -31,6 +33,10 @@ type AssistantClient interface {
 	Query(ctx context.Context, in *QueryRequest, opts ...grpc.CallOption) (*QueryResponse, error)
 	Health(ctx context.Context, in *HealthRequest, opts ...grpc.CallOption) (*HealthResponse, error)
 	History(ctx context.Context, in *HistoryRequest, opts ...grpc.CallOption) (*HistoryResponse, error)
+	// Reads text aloud. A long answer exceeds a Go client's default 4 MiB receive limit; raise it for this call.
+	Speak(ctx context.Context, in *SpeakRequest, opts ...grpc.CallOption) (*SpeakResponse, error)
+	// Returns what a recording says, without answering it. Audio may be up to 20 MiB.
+	Transcribe(ctx context.Context, in *TranscribeRequest, opts ...grpc.CallOption) (*TranscribeResponse, error)
 }
 
 type assistantClient struct {
@@ -71,6 +77,26 @@ func (c *assistantClient) History(ctx context.Context, in *HistoryRequest, opts 
 	return out, nil
 }
 
+func (c *assistantClient) Speak(ctx context.Context, in *SpeakRequest, opts ...grpc.CallOption) (*SpeakResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SpeakResponse)
+	err := c.cc.Invoke(ctx, Assistant_Speak_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *assistantClient) Transcribe(ctx context.Context, in *TranscribeRequest, opts ...grpc.CallOption) (*TranscribeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TranscribeResponse)
+	err := c.cc.Invoke(ctx, Assistant_Transcribe_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AssistantServer is the server API for Assistant service.
 // All implementations must embed UnimplementedAssistantServer
 // for forward compatibility.
@@ -78,6 +104,10 @@ type AssistantServer interface {
 	Query(context.Context, *QueryRequest) (*QueryResponse, error)
 	Health(context.Context, *HealthRequest) (*HealthResponse, error)
 	History(context.Context, *HistoryRequest) (*HistoryResponse, error)
+	// Reads text aloud. A long answer exceeds a Go client's default 4 MiB receive limit; raise it for this call.
+	Speak(context.Context, *SpeakRequest) (*SpeakResponse, error)
+	// Returns what a recording says, without answering it. Audio may be up to 20 MiB.
+	Transcribe(context.Context, *TranscribeRequest) (*TranscribeResponse, error)
 	mustEmbedUnimplementedAssistantServer()
 }
 
@@ -96,6 +126,12 @@ func (UnimplementedAssistantServer) Health(context.Context, *HealthRequest) (*He
 }
 func (UnimplementedAssistantServer) History(context.Context, *HistoryRequest) (*HistoryResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method History not implemented")
+}
+func (UnimplementedAssistantServer) Speak(context.Context, *SpeakRequest) (*SpeakResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Speak not implemented")
+}
+func (UnimplementedAssistantServer) Transcribe(context.Context, *TranscribeRequest) (*TranscribeResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Transcribe not implemented")
 }
 func (UnimplementedAssistantServer) mustEmbedUnimplementedAssistantServer() {}
 func (UnimplementedAssistantServer) testEmbeddedByValue()                   {}
@@ -172,6 +208,42 @@ func _Assistant_History_Handler(srv interface{}, ctx context.Context, dec func(i
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Assistant_Speak_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SpeakRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AssistantServer).Speak(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Assistant_Speak_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AssistantServer).Speak(ctx, req.(*SpeakRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Assistant_Transcribe_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TranscribeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AssistantServer).Transcribe(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Assistant_Transcribe_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AssistantServer).Transcribe(ctx, req.(*TranscribeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Assistant_ServiceDesc is the grpc.ServiceDesc for Assistant service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -190,6 +262,14 @@ var Assistant_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "History",
 			Handler:    _Assistant_History_Handler,
+		},
+		{
+			MethodName: "Speak",
+			Handler:    _Assistant_Speak_Handler,
+		},
+		{
+			MethodName: "Transcribe",
+			Handler:    _Assistant_Transcribe_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

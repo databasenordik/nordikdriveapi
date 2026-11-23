@@ -1,24 +1,16 @@
 package chat
 
 import (
-	"bytes"
 	"context"
-	"encoding/base64"
-	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
-	"os"
-	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 
-	"golang.org/x/oauth2/google"
 	"golang.org/x/sync/singleflight"
 	"google.golang.org/api/googleapi"
 	"google.golang.org/genai"
@@ -72,13 +64,6 @@ var (
 	}
 	readAllHook = func(r io.Reader) ([]byte, error) {
 		return io.ReadAll(r)
-	}
-
-	defaultHTTPClientHook = func(ctx context.Context) (*http.Client, error) {
-		return google.DefaultClient(ctx, "https://www.googleapis.com/auth/cloud-platform")
-	}
-	httpDoHook = func(c *http.Client, req *http.Request) (*http.Response, error) {
-		return c.Do(req)
 	}
 )
 
@@ -263,197 +248,6 @@ func (cs *ChatService) getQueryStrategy() ChatQueryStrategy {
 		return cs.QueryStrategy
 	}
 	return structuredRetrievalChatStrategy{}
-}
-
-func (cs *ChatService) TTS(text string) (*TTSAudio, error) {
-	ctx := requestscope.Context(cs.DB)
-
-	project := strings.TrimSpace(cs.ProjectID)
-	loc := strings.TrimSpace(cs.Location)
-
-	if cs.Client != nil {
-		cc := cs.Client.ClientConfig()
-		if project == "" {
-			project = strings.TrimSpace(cc.Project)
-		}
-		if loc == "" {
-			loc = strings.TrimSpace(cc.Location)
-		}
-	}
-	if project == "" {
-		project = strings.TrimSpace(os.Getenv("GOOGLE_CLOUD_PROJECT"))
-	}
-
-	if project == "" {
-		return nil, fmt.Errorf("missing project id (set ChatService.ProjectID or GOOGLE_CLOUD_PROJECT)")
-	}
-	if loc == "" {
-		loc = "global"
-	}
-
-	host := "https://aiplatform.googleapis.com"
-	if strings.ToLower(loc) != "global" {
-		host = fmt.Sprintf("https://%s-aiplatform.googleapis.com", loc)
-	}
-
-	url := fmt.Sprintf(
-		"%s/v1beta1/projects/%s/locations/%s/publishers/google/models/%s:generateContent",
-		host, project, loc, ttsModel,
-	)
-
-	prompt := fmt.Sprintf(
-		"Style: %s.\nRead the following TEXT exactly as written. Do not add or remove words.\n\nTEXT:\n%s",
-		ttsStyleInstr, text,
-	)
-
-	reqBody := map[string]any{
-		"contents": []any{
-			map[string]any{
-				"role": "user",
-				"parts": []any{
-					map[string]any{"text": prompt},
-				},
-			},
-		},
-		"generationConfig": map[string]any{
-			"responseModalities": []string{"AUDIO"},
-			"speechConfig": map[string]any{
-				"voiceConfig": map[string]any{
-					"prebuiltVoiceConfig": map[string]any{
-						"voiceName": ttsVoiceName,
-					},
-				},
-			},
-		},
-	}
-
-	payload, _ := json.Marshal(reqBody)
-
-	httpClient, err := defaultHTTPClientHook(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("adc auth error: %w", err)
-	}
-
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := httpDoHook(httpClient, req)
-	if err != nil {
-		return nil, fmt.Errorf("vertex tts request error: %w", err)
-	}
-	defer resp.Body.Close()
-
-	raw, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("vertex tts failed (%d): %s", resp.StatusCode, string(raw))
-	}
-
-	type inlineData struct {
-		MimeType string `json:"mimeType"`
-		Data     string `json:"data"`
-	}
-	type part struct {
-		InlineData *inlineData `json:"inlineData,omitempty"`
-		Text       string      `json:"text,omitempty"`
-	}
-	type content struct {
-		Parts []part `json:"parts"`
-	}
-	type candidate struct {
-		Content content `json:"content"`
-	}
-	type genResp struct {
-		Candidates []candidate `json:"candidates"`
-	}
-
-	var gr genResp
-	if err := json.Unmarshal(raw, &gr); err != nil {
-		return nil, fmt.Errorf("failed to parse vertex response: %w", err)
-	}
-	if len(gr.Candidates) == 0 || len(gr.Candidates[0].Content.Parts) == 0 {
-		return nil, fmt.Errorf("no audio returned from vertex")
-	}
-
-	for _, p := range gr.Candidates[0].Content.Parts {
-		if p.InlineData == nil || p.InlineData.Data == "" {
-			continue
-		}
-
-		pcm, err := decodeBase64Loose(p.InlineData.Data)
-		if err != nil {
-			return nil, fmt.Errorf("failed to decode audio data: %w", err)
-		}
-
-		rate := parseRateFromMime(p.InlineData.MimeType)
-		if rate == 0 {
-			rate = ttsSampleRate
-		}
-
-		wavBytes := pcmToWav(pcm, rate, ttsChannels, ttsBitsPerSample)
-		return &TTSAudio{MimeType: "audio/wav", Data: wavBytes}, nil
-	}
-
-	return nil, fmt.Errorf("no inline audio returned from vertex")
-}
-
-var rateRe = regexp.MustCompile(`rate\s*=\s*(\d+)`)
-
-func parseRateFromMime(m string) int {
-	m = strings.ToLower(m)
-	if m == "" {
-		return 0
-	}
-	mm := rateRe.FindStringSubmatch(m)
-	if len(mm) == 2 {
-		if v, err := strconv.Atoi(mm[1]); err == nil && v > 0 {
-			return v
-		}
-	}
-	return 0
-}
-
-func decodeBase64Loose(s string) ([]byte, error) {
-	if b, err := base64.StdEncoding.DecodeString(s); err == nil {
-		return b, nil
-	}
-	return base64.RawStdEncoding.DecodeString(s)
-}
-
-func pcmToWav(pcm []byte, sampleRate, channels, bitsPerSample int) []byte {
-	if sampleRate <= 0 {
-		sampleRate = ttsSampleRate
-	}
-	if channels <= 0 {
-		channels = ttsChannels
-	}
-	if bitsPerSample <= 0 {
-		bitsPerSample = ttsBitsPerSample
-	}
-
-	byteRate := sampleRate * channels * (bitsPerSample / 8)
-	blockAlign := channels * (bitsPerSample / 8)
-	dataSize := len(pcm)
-	riffSize := 36 + dataSize
-
-	buf := new(bytes.Buffer)
-	buf.WriteString("RIFF")
-	_ = binary.Write(buf, binary.LittleEndian, uint32(riffSize))
-	buf.WriteString("WAVE")
-
-	buf.WriteString("fmt ")
-	_ = binary.Write(buf, binary.LittleEndian, uint32(16))
-	_ = binary.Write(buf, binary.LittleEndian, uint16(1))
-	_ = binary.Write(buf, binary.LittleEndian, uint16(channels))
-	_ = binary.Write(buf, binary.LittleEndian, uint32(sampleRate))
-	_ = binary.Write(buf, binary.LittleEndian, uint32(byteRate))
-	_ = binary.Write(buf, binary.LittleEndian, uint16(blockAlign))
-	_ = binary.Write(buf, binary.LittleEndian, uint16(bitsPerSample))
-
-	buf.WriteString("data")
-	_ = binary.Write(buf, binary.LittleEndian, uint32(dataSize))
-	buf.Write(pcm)
-
-	return buf.Bytes()
 }
 
 func isRateLimit429(err error) bool {

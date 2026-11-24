@@ -3,7 +3,6 @@ package chat
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -319,38 +318,6 @@ func routedAnswerPayloadFromPrompt(t *testing.T, contents []*genai.Content) rout
 func strconvQuote(v string) string {
 	b, _ := json.Marshal(v)
 	return string(b)
-}
-
-func Test_parseRateFromMime(t *testing.T) {
-	if parseRateFromMime("") != 0 {
-		t.Fatal("expected 0")
-	}
-	if parseRateFromMime("audio/L16") != 0 {
-		t.Fatal("expected 0 when no rate")
-	}
-	if parseRateFromMime("audio/L16;rate=48000") != 48000 {
-		t.Fatal("expected 48000")
-	}
-}
-
-func Test_decodeBase64Loose(t *testing.T) {
-	plain := []byte("ABC")
-	padded := base64.StdEncoding.EncodeToString(plain)
-	raw := base64.RawStdEncoding.EncodeToString(plain)
-
-	if b, _ := decodeBase64Loose(padded); string(b) != "ABC" {
-		t.Fatalf("padded decode failed: %q", string(b))
-	}
-	if b, _ := decodeBase64Loose(raw); string(b) != "ABC" {
-		t.Fatalf("raw decode failed: %q", string(b))
-	}
-}
-
-func Test_pcmToWav_defaults(t *testing.T) {
-	out := pcmToWav([]byte{0x01, 0x02}, 0, 0, 0)
-	if len(out) < 12 || string(out[:4]) != "RIFF" || string(out[8:12]) != "WAVE" {
-		t.Fatalf("bad wav header: %q", out[:12])
-	}
 }
 
 func TestFirstTextFromResp_ReturnsFirstNonEmptyPart(t *testing.T) {

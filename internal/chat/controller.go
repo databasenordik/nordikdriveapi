@@ -135,7 +135,6 @@ func (cc *ChatController) Describe(c *gin.Context) {
 }
 
 func (cc *ChatController) TTS(c *gin.Context) {
-	cc = cc.withContext(c.Request.Context())
 	text := strings.TrimSpace(c.PostForm("text"))
 	if text == "" {
 		text = strings.TrimSpace(c.PostForm("answer"))
@@ -157,9 +156,23 @@ func (cc *ChatController) TTS(c *gin.Context) {
 		return
 	}
 
-	audio, err := cc.ChatService.TTS(text)
+	speaker, ok := cc.Backend.(speechBackend)
+	if !ok {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "speech requires NIA (CHAT_USE_NIA=true)"})
+		return
+	}
+	userID, ok := chatUserID(c)
+	if !ok {
+		return
+	}
+	audio, err := speaker.Speak(c.Request.Context(), userID, text)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		code, message := http.StatusBadGateway, "speech request failed"
+		var upstream *ChatHTTPError
+		if errors.As(err, &upstream) {
+			code, message = upstream.Status, upstream.Message
+		}
+		c.JSON(code, gin.H{"error": message})
 		return
 	}
 

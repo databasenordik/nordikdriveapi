@@ -397,6 +397,214 @@ func (x *HistoryResponse) GetResultJson() []byte {
 	return nil
 }
 
+type SpeakRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Text          string                 `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
+	UserId        int64                  `protobuf:"varint,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SpeakRequest) Reset() {
+	*x = SpeakRequest{}
+	mi := &file_nia_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SpeakRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SpeakRequest) ProtoMessage() {}
+
+func (x *SpeakRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_nia_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SpeakRequest.ProtoReflect.Descriptor instead.
+func (*SpeakRequest) Descriptor() ([]byte, []int) {
+	return file_nia_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *SpeakRequest) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
+func (x *SpeakRequest) GetUserId() int64 {
+	if x != nil {
+		return x.UserId
+	}
+	return 0
+}
+
+type SpeakResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Audio         []byte                 `protobuf:"bytes,1,opt,name=audio,proto3" json:"audio,omitempty"`
+	MimeType      string                 `protobuf:"bytes,2,opt,name=mime_type,json=mimeType,proto3" json:"mime_type,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SpeakResponse) Reset() {
+	*x = SpeakResponse{}
+	mi := &file_nia_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SpeakResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SpeakResponse) ProtoMessage() {}
+
+func (x *SpeakResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_nia_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SpeakResponse.ProtoReflect.Descriptor instead.
+func (*SpeakResponse) Descriptor() ([]byte, []int) {
+	return file_nia_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *SpeakResponse) GetAudio() []byte {
+	if x != nil {
+		return x.Audio
+	}
+	return nil
+}
+
+func (x *SpeakResponse) GetMimeType() string {
+	if x != nil {
+		return x.MimeType
+	}
+	return ""
+}
+
+type TranscribeRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Audio         []byte                 `protobuf:"bytes,1,opt,name=audio,proto3" json:"audio,omitempty"`
+	MimeType      string                 `protobuf:"bytes,2,opt,name=mime_type,json=mimeType,proto3" json:"mime_type,omitempty"`
+	UserId        int64                  `protobuf:"varint,3,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TranscribeRequest) Reset() {
+	*x = TranscribeRequest{}
+	mi := &file_nia_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TranscribeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TranscribeRequest) ProtoMessage() {}
+
+func (x *TranscribeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_nia_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TranscribeRequest.ProtoReflect.Descriptor instead.
+func (*TranscribeRequest) Descriptor() ([]byte, []int) {
+	return file_nia_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *TranscribeRequest) GetAudio() []byte {
+	if x != nil {
+		return x.Audio
+	}
+	return nil
+}
+
+func (x *TranscribeRequest) GetMimeType() string {
+	if x != nil {
+		return x.MimeType
+	}
+	return ""
+}
+
+func (x *TranscribeRequest) GetUserId() int64 {
+	if x != nil {
+		return x.UserId
+	}
+	return 0
+}
+
+type TranscribeResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Text          string                 `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TranscribeResponse) Reset() {
+	*x = TranscribeResponse{}
+	mi := &file_nia_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TranscribeResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TranscribeResponse) ProtoMessage() {}
+
+func (x *TranscribeResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_nia_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TranscribeResponse.ProtoReflect.Descriptor instead.
+func (*TranscribeResponse) Descriptor() ([]byte, []int) {
+	return file_nia_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *TranscribeResponse) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
 var File_nia_proto protoreflect.FileDescriptor
 
 const file_nia_proto_rawDesc = "" +
@@ -431,11 +639,26 @@ const file_nia_proto_rawDesc = "" +
 	"\x05limit\x18\x04 \x01(\x05R\x05limit\"2\n" +
 	"\x0fHistoryResponse\x12\x1f\n" +
 	"\vresult_json\x18\x01 \x01(\fR\n" +
-	"resultJson2\xe0\x01\n" +
+	"resultJson\";\n" +
+	"\fSpeakRequest\x12\x12\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\x03R\x06userId\"B\n" +
+	"\rSpeakResponse\x12\x14\n" +
+	"\x05audio\x18\x01 \x01(\fR\x05audio\x12\x1b\n" +
+	"\tmime_type\x18\x02 \x01(\tR\bmimeType\"_\n" +
+	"\x11TranscribeRequest\x12\x14\n" +
+	"\x05audio\x18\x01 \x01(\fR\x05audio\x12\x1b\n" +
+	"\tmime_type\x18\x02 \x01(\tR\bmimeType\x12\x17\n" +
+	"\auser_id\x18\x03 \x01(\x03R\x06userId\"(\n" +
+	"\x12TranscribeResponse\x12\x12\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text2\xf7\x02\n" +
 	"\tAssistant\x12B\n" +
 	"\x05Query\x12\x1b.nordik.nia.v1.QueryRequest\x1a\x1c.nordik.nia.v1.QueryResponse\x12E\n" +
 	"\x06Health\x12\x1c.nordik.nia.v1.HealthRequest\x1a\x1d.nordik.nia.v1.HealthResponse\x12H\n" +
-	"\aHistory\x12\x1d.nordik.nia.v1.HistoryRequest\x1a\x1e.nordik.nia.v1.HistoryResponseB(Z&nordik-drive-api/internal/nia/pb;niapbb\x06proto3"
+	"\aHistory\x12\x1d.nordik.nia.v1.HistoryRequest\x1a\x1e.nordik.nia.v1.HistoryResponse\x12B\n" +
+	"\x05Speak\x12\x1b.nordik.nia.v1.SpeakRequest\x1a\x1c.nordik.nia.v1.SpeakResponse\x12Q\n" +
+	"\n" +
+	"Transcribe\x12 .nordik.nia.v1.TranscribeRequest\x1a!.nordik.nia.v1.TranscribeResponseB(Z&nordik-drive-api/internal/nia/pb;niapbb\x06proto3"
 
 var (
 	file_nia_proto_rawDescOnce sync.Once
@@ -449,24 +672,32 @@ func file_nia_proto_rawDescGZIP() []byte {
 	return file_nia_proto_rawDescData
 }
 
-var file_nia_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_nia_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_nia_proto_goTypes = []any{
-	(*QueryRequest)(nil),    // 0: nordik.nia.v1.QueryRequest
-	(*QueryResponse)(nil),   // 1: nordik.nia.v1.QueryResponse
-	(*HealthRequest)(nil),   // 2: nordik.nia.v1.HealthRequest
-	(*HealthResponse)(nil),  // 3: nordik.nia.v1.HealthResponse
-	(*HistoryRequest)(nil),  // 4: nordik.nia.v1.HistoryRequest
-	(*HistoryResponse)(nil), // 5: nordik.nia.v1.HistoryResponse
+	(*QueryRequest)(nil),       // 0: nordik.nia.v1.QueryRequest
+	(*QueryResponse)(nil),      // 1: nordik.nia.v1.QueryResponse
+	(*HealthRequest)(nil),      // 2: nordik.nia.v1.HealthRequest
+	(*HealthResponse)(nil),     // 3: nordik.nia.v1.HealthResponse
+	(*HistoryRequest)(nil),     // 4: nordik.nia.v1.HistoryRequest
+	(*HistoryResponse)(nil),    // 5: nordik.nia.v1.HistoryResponse
+	(*SpeakRequest)(nil),       // 6: nordik.nia.v1.SpeakRequest
+	(*SpeakResponse)(nil),      // 7: nordik.nia.v1.SpeakResponse
+	(*TranscribeRequest)(nil),  // 8: nordik.nia.v1.TranscribeRequest
+	(*TranscribeResponse)(nil), // 9: nordik.nia.v1.TranscribeResponse
 }
 var file_nia_proto_depIdxs = []int32{
 	0, // 0: nordik.nia.v1.Assistant.Query:input_type -> nordik.nia.v1.QueryRequest
 	2, // 1: nordik.nia.v1.Assistant.Health:input_type -> nordik.nia.v1.HealthRequest
 	4, // 2: nordik.nia.v1.Assistant.History:input_type -> nordik.nia.v1.HistoryRequest
-	1, // 3: nordik.nia.v1.Assistant.Query:output_type -> nordik.nia.v1.QueryResponse
-	3, // 4: nordik.nia.v1.Assistant.Health:output_type -> nordik.nia.v1.HealthResponse
-	5, // 5: nordik.nia.v1.Assistant.History:output_type -> nordik.nia.v1.HistoryResponse
-	3, // [3:6] is the sub-list for method output_type
-	0, // [0:3] is the sub-list for method input_type
+	6, // 3: nordik.nia.v1.Assistant.Speak:input_type -> nordik.nia.v1.SpeakRequest
+	8, // 4: nordik.nia.v1.Assistant.Transcribe:input_type -> nordik.nia.v1.TranscribeRequest
+	1, // 5: nordik.nia.v1.Assistant.Query:output_type -> nordik.nia.v1.QueryResponse
+	3, // 6: nordik.nia.v1.Assistant.Health:output_type -> nordik.nia.v1.HealthResponse
+	5, // 7: nordik.nia.v1.Assistant.History:output_type -> nordik.nia.v1.HistoryResponse
+	7, // 8: nordik.nia.v1.Assistant.Speak:output_type -> nordik.nia.v1.SpeakResponse
+	9, // 9: nordik.nia.v1.Assistant.Transcribe:output_type -> nordik.nia.v1.TranscribeResponse
+	5, // [5:10] is the sub-list for method output_type
+	0, // [0:5] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
 	0, // [0:0] is the sub-list for extension extendee
 	0, // [0:0] is the sub-list for field type_name
@@ -483,7 +714,7 @@ func file_nia_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_nia_proto_rawDesc), len(file_nia_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   6,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
